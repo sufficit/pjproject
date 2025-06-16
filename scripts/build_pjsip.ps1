@@ -4,10 +4,11 @@
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
 # Date: June 16, 2025
-# Version: 2
+# Version: 3
 #
 # This script builds the PJSIP solution using MSBuild, ensuring the correct configuration
-# and platform are applied. It now attempts to find the solution file more robustly.
+# and platform are applied. It now attempts to find the solution file more robustly
+# by including specific solution file names found in the 'sufficit/pjproject' repository.
 # =================================================================================================
 
 param (
@@ -25,7 +26,9 @@ if (-not (Test-Path $solutionPath)) {
     Write-Host "Provided solution path '$solutionPath' does not exist. Attempting to find common PJSIP solution files..."
 
     $possibleSolutionPaths = @(
-        "pjproject.sln", # Common: Solution in root
+        "pjproject-vs14.sln", # Added based on the provided image
+        "pjproject-vs8.sln",  # Added based on the provided image
+        "pjproject.sln",      # Common: Solution in root
         "pjproject-vs2019.sln", # Common: Specific VS version in root
         "pjproject-vs2022.sln", # Common: Specific VS version in root
         "build/vs/pjproject.sln", # Common: VS solution in build/vs
