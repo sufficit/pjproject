@@ -10,13 +10,11 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.15
+# Action Version: 1.0.16
 # Last Updated: 2025-06-16
 # Description of Changes:
-#   - **Removed the dynamic creation of PowerShell script files from the workflow.**
-#   - **The workflow now assumes that 'download_opus_windows.ps1', 'build_pjsip.ps1',**
-#     **and 'patch.ps1' are pre-existing files located in the 'scripts/' directory**
-#     **at the root of the repository.**
+#   - **Added a new step to create 'pjsip_extra_defines.h' via 'scripts/create_extra_config.ps1'.**
+#   - **Modified 'config_site.h' creation to include 'pjsip_extra_defines.h'.**
 #   - **Ensured all comments in the code are in English.**
 #   - Updated the repository path to 'sufficit/pjproject' in the initial checkout.
 #   - Implemented downloading of pre-compiled Opus artifacts from the 'sufficit/opus' repository
@@ -87,12 +85,18 @@ jobs:
         run: pwsh.exe -File scripts/download_opus_windows.ps1 # Directly call the script from the 'scripts' folder
         shell: pwsh
 
-      # Step 3: Create PJSIP config_site.h
+      # Step 3: Create pjsip_extra_defines.h using a script
+      - name: Create PJSIP extra defines header
+        shell: pwsh
+        run: |
+          pwsh.exe -File scripts/create_extra_config.ps1 # Execute the script to create the extra defines file
+
+      # Step 4: Create PJSIP config_site.h
       - name: Create PJSIP config_site.h
         shell: pwsh
         run: |
           # This content defines PJSIP's configuration, including Opus support and Windows x64 specific macros.
-          # All blank lines have been removed to prevent potential YAML parsing issues with literal blocks.
+          # It now includes the custom 'pjsip_extra_defines.h' file.
           $configSiteContent = @"
 # =================================================================================================
 # PJSIP CUSTOM CONFIGURATION FILE
@@ -116,14 +120,15 @@ jobs:
 #define _WIN32
 #define _M_X64
 #include <pj/config_site_sample.h>
+#include <pj/pjsip_extra_defines.h> // Include the new extra defines file
 "@
           Set-Content -Path "pjlib/include/pj/config_site.h" -Value $configSiteContent
 
-      # Step 4: Add MSBuild to path
+      # Step 5: Add MSBuild to path
       - name: Add MSBuild to path
         uses: microsoft/setup-msbuild@v2
 
-      # Step 5: Patch PJSIP pjmedia_codec.vcxproj for x64 defines
+      # Step 6: Patch PJSIP pjmedia_codec.vcxproj for x64 defines
       - name: Patch PJSIP pjmedia_codec.vcxproj for x64 defines
         shell: pwsh
         run: |
@@ -131,7 +136,7 @@ jobs:
           Write-Host "Executing patch script: scripts/patch.ps1 on $pjmedia_codec_vcxproj_path"
           pwsh.exe -File scripts/patch.ps1 -ProjFile $pjmedia_codec_vcxproj_path # Directly call the script
 
-      # Step 6: Build PJSIP Solution
+      # Step 7: Build PJSIP Solution
       - name: Build PJSIP Solution
         shell: pwsh
         run: |
@@ -139,7 +144,7 @@ jobs:
           Write-Host "Executing script: scripts/build_pjsip.ps1 with solution file: $sln_path"
           pwsh.exe -File scripts/build_pjsip.ps1 -SlnFile $sln_path # Directly call the script
 
-      # Step 7: Upload PJSIP Libraries as Artifact
+      # Step 8: Upload PJSIP Libraries as Artifact
       - name: Upload PJSIP Libraries as Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -469,7 +474,7 @@ jobs:
       - name: Set Release Tag Name
         id: set_tag
         run: |
-          echo "RELEASE_TAG=build-${{ needs.build-windows.outputs.build_version }}" >> $GITHUB_ENV
+          echo "RELEASE_TAG=build-${{ needs.build-windows.outputs.build_version }}" >> "$GITHUB_ENV"
 
       # Step 1: Download all build artifacts
       - name: Download all build artifacts
