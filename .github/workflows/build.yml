@@ -10,10 +10,13 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.14
+# Action Version: 1.0.15
 # Last Updated: 2025-06-16
 # Description of Changes:
-#   - **Extracted PowerShell scripts into separate .ps1 files within the 'scripts' directory.**
+#   - **Removed the dynamic creation of PowerShell script files from the workflow.**
+#   - **The workflow now assumes that 'download_opus_windows.ps1', 'build_pjsip.ps1',**
+#     **and 'patch.ps1' are pre-existing files located in the 'scripts/' directory**
+#     **at the root of the repository.**
 #   - **Ensured all comments in the code are in English.**
 #   - Updated the repository path to 'sufficit/pjproject' in the initial checkout.
 #   - Implemented downloading of pre-compiled Opus artifacts from the 'sufficit/opus' repository
@@ -24,8 +27,6 @@
 #   - Added 'jq' installation for parsing GitHub API JSON for release downloads.
 #   - Included `chown` command in Docker build step to resolve permission issues for artifacts.
 #   - Maintained all previous build and release functionalities.
-#   - Fixed YAML syntax error on line 99 by reordering 'id' and 'env' blocks within the step,
-#     and adding 'continue-on-error' for debugging.
 #
 # For more information on GitHub Actions: https://docs.github.com/en/actions
 # For PJSIP build instructions:
@@ -78,99 +79,15 @@ jobs:
           path: . # Checkout to the root of the workspace
           submodules: recursive # If there are submodules, they will also be cloned
 
-      # Step 2: Create download_opus_windows.ps1
-      - name: Create download_opus_windows.ps1
-        shell: pwsh
-        run: |
-          # This script handles the download and extraction of pre-compiled Opus libraries for Windows.
-          # It fetches the latest Opus release from GitHub and copies necessary files to PJSIP's directories.
-          $downloadOpusScriptContent = @"
-# =================================================================================================
-# DOWNLOAD OPUS SCRIPT FOR WINDOWS (CALLED BY GITHUB ACTIONS WORKFLOW)
-#
-# Author: Hugo Castro de Deco, Sufficit
-# Collaboration: Gemini AI for Google
-# Date: June 15, 2025
-# Version: 1
-#
-# This script downloads the latest pre-compiled Opus library for Windows from a GitHub Release,
-# extracts it, and copies the necessary .lib and .h files to the PJSIP build environment.
-# =================================================================================================
-
-$REPO_OWNER="sufficit"
-$REPO_NAME="opus"
-$ARTIFACT_PREFIX="opus-windows-x64"
-$ARTIFACT_EXT=".zip"
-
-Write-Host "Fetching latest release tag from https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest"
-$LATEST_RELEASE_DATA = Invoke-RestMethod -Uri "https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest" -Headers @{Authorization = "token $env:GITHUB_TOKEN"} -ErrorAction Stop
-
-$LATEST_RELEASE_TAG = $LATEST_RELEASE_DATA.tag_name
-if (-not $LATEST_RELEASE_TAG) {
-  Write-Host "##[error]Error: Could not find latest release tag for ${REPO_OWNER}/${REPO_NAME}"
-  exit 1
-}
-Write-Host "Found latest Opus release tag: $LATEST_RELEASE_TAG"
-
-$OPUS_BUILD_VERSION = ($LATEST_RELEASE_TAG -replace "build-", "") # Assumes tag is 'build-YYYYMMDD-HHMMSS'
-$EXPECTED_ARTIFACT_NAME = "${ARTIFACT_PREFIX}-${OPUS_BUILD_VERSION}${ARTIFACT_EXT}"
-Write-Host "Expected artifact name: $EXPECTED_ARTIFACT_NAME"
-
-$DOWNLOAD_URL = $LATEST_RELEASE_DATA.assets | Where-Object { $_.name -eq $EXPECTED_ARTIFACT_NAME } | Select-Object -ExpandProperty browser_download_url
-if (-not $DOWNLOAD_URL) {
-  Write-Host "##[error]Error: Could not find download URL for artifact $EXPECTED_ARTIFACT_NAME in release $LATEST_RELEASE_TAG"
-  exit 1
-}
-Write-Host "Downloading Opus artifact from: $DOWNLOAD_URL"
-
-New-Item -ItemType Directory -Path "external_libs/opus_temp" -Force
-$zipPath = Join-Path -Path "external_libs/opus_temp" -ChildPath $EXPECTED_ARTIFACT_NAME
-
-Invoke-WebRequest -Uri $DOWNLOAD_URL -OutFile $zipPath
-
-Write-Host "Extracting $zipPath to external_libs/opus_temp/"
-Expand-Archive -Path $zipPath -DestinationPath "external_libs/opus_temp/" -Force
-
-# Copy opus.lib to PJSIP's lib directory
-$pjsipLibDir = "lib"
-New-Item -ItemType Directory -Path $pjsipLibDir -Force
-
-$foundOpusLib = Get-ChildItem -Path "external_libs/opus_temp" -Filter "opus.lib" -Recurse | Select-Object -First 1
-
-if ($foundOpusLib) {
-    Copy-Item -Path $foundOpusLib.FullName -Destination $pjsipLibDir
-    Write-Host "Copied opus.lib from $($foundOpusLib.FullName) to $pjsipLibDir"
-} else {
-    Write-Host "##[error]Error: opus.lib not found within the extracted contents of the Opus release. Please check the structure."
-    exit 1
-}
-
-# Copy Opus headers to PJSIP's pjlib/include/pj/opus directory
-$pjIncludeOpusDir = "pjlib/include/pj/opus"
-New-Item -ItemType Directory -Path $pjIncludeOpusDir -Force
-
-$foundOpusHeadersPath = Get-ChildItem -Path "external_libs/opus_temp" -Filter "opus.h" -Recurse | Select-Object -ExpandProperty DirectoryName | Select-Object -First 1
-
-if ($foundOpusHeadersPath) {
-    Copy-Item -Path (Join-Path -Path $foundOpusHeadersPath -ChildPath "*.h") -Destination $pjIncludeOpusDir
-    Write-Host "Copied Opus headers from $($foundOpusHeadersPath) to $pjIncludeOpusDir"
-} else {
-    Write-Host "##[warning]Warning: Opus 'opus.h' header file not found within extracted contents. Headers might be missing."
-}
-"@
-          New-Item -Path "scripts" -ItemType Directory -Force # Ensure scripts directory exists
-          Set-Content -Path "scripts/download_opus_windows.ps1" -Value $downloadOpusScriptContent
-
-      # Step 3: Find and download the latest Opus release for Windows (Execute script)
+      # Step 2: Find and download the latest Opus release for Windows (Execute script)
       - name: Find and download latest Opus Windows release
-        id: download_opus_release_windows # Moved 'id' to be before 'env'
+        id: download_opus_release_windows
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: pwsh.exe -File scripts/download_opus_windows.ps1
+        run: pwsh.exe -File scripts/download_opus_windows.ps1 # Directly call the script from the 'scripts' folder
         shell: pwsh
-        continue-on-error: true # Added for debugging YAML syntax issues. Remove for production.
 
-      # Step 4: Create PJSIP config_site.h
+      # Step 3: Create PJSIP config_site.h
       - name: Create PJSIP config_site.h
         shell: pwsh
         run: |
@@ -202,148 +119,27 @@ if ($foundOpusHeadersPath) {
 "@
           Set-Content -Path "pjlib/include/pj/config_site.h" -Value $configSiteContent
 
-      # Step 5: Add MSBuild to path
+      # Step 4: Add MSBuild to path
       - name: Add MSBuild to path
         uses: microsoft/setup-msbuild@v2
 
-      # Step 6: Create build_pjsip.ps1
-      - name: Create build_pjsip.ps1
-        shell: pwsh
-        run: |
-          # This script builds the PJSIP solution using MSBuild.
-          # It is created dynamically because it needs to be present in the runner's workspace.
-          $buildScriptContent = @"
-# =================================================================================================
-# BUILD SCRIPT FOR PJSIP SOLUTION (CALLED BY GITHUB ACTIONS WORKFLOW)
-#
-# Author: Hugo Castro de Deco, Sufficit
-# Collaboration: Gemini AI for Google
-# Date: June 15, 2025
-# Version: 1
-#
-# This script builds the PJSIP solution using MSBuild, ensuring the correct configuration
-# and platform are applied.
-# =================================================================================================
-
-param (
-    [string]$SlnFile # Path to the PJSIP solution file, e.g., pjproject/pjproject-vs14.sln
-)
-
-$solutionPath = $SlnFile
-$configuration = "Release"
-$platform = "x64" # Targeting x64
-
-$msbuildPath = "msbuild.exe"
-
-Write-Host "Building PJSIP solution: $solutionPath"
-Write-Host "Configuration: $configuration"
-Write-Host "Platform: $platform"
-
-try {
-    & $msbuildPath $solutionPath /p:Configuration=$configuration /p:Platform=$platform /m /t:Rebuild
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "##[error]MSBuild failed with exit code $LASTEXITCODE."
-        exit 1
-    }
-} catch {
-    Write-Host "##[error]An error occurred during MSBuild execution: $($_.Exception.Message)"
-    exit 1
-}
-"@
-          New-Item -Path "scripts" -ItemType Directory -Force # Ensure scripts directory exists
-          Set-Content -Path "scripts/build_pjsip.ps1" -Value $buildScriptContent
-
-      # Step 7: Create patch.ps1
-      - name: Create patch.ps1
-        shell: pwsh
-        run: |
-          # This script patches the pjmedia_codec.vcxproj to ensure x64 specific preprocessor definitions.
-          # It is created dynamically because it needs to be present in the runner's workspace.
-          $patchScriptContent = @"
-# =================================================================================================
-# PATCH SCRIPT FOR PJSIP PROJECT FILES (CALLED BY GITHUB ACTIONS WORKFLOW)
-#
-# Author: Hugo Castro de Deco, Sufficit
-# Collaboration: Gemini AI for Google
-# Date: June 15, 2025
-# Version: 6 (Corrected SelectSingleNode with XmlNamespaceManager)
-#
-# This script is intended to apply specific patches to PJSIP project files,
-# such as adjusting include paths or build settings.
-# =================================================================================================
-
-param (
-    [Parameter(Mandatory=$true)]
-    [string]$ProjFile
-)
-
-Write-Host "Executing patch script for: $ProjFile"
-
-try {
-    [xml]$projXml = Get-Content $ProjFile
-
-    $nsManager = New-Object System.Xml.XmlNamespaceManager($projXml.NameTable)
-    $nsManager.AddNamespace("msbuild", "http://schemas.microsoft.com/developer/msbuild/2003")
-
-    $clCompileNode = $projXml.SelectSingleNode("//msbuild:ItemDefinitionGroup[contains(@Condition, 'Release') and contains(@Condition, 'x64')]/msbuild:ClCompile", $nsManager)
-
-    if ($clCompileNode) {
-        $preprocessorDefinitionsNode = $clCompileNode.SelectSingleNode("./msbuild:PreprocessorDefinitions", $nsManager)
-
-        if ($preprocessorDefinitionsNode) {
-            $existingDefinitions = $preprocessorDefinitionsNode.'#text'
-            $newDefinitions = "_M_X64;_WIN64;$existingDefinitions"
-            $preprocessorDefinitionsNode.'#text' = $newDefinitions
-            Write-Host "Updated PreprocessorDefinitions for Release|x64 in $ProjFile."
-            Write-Host "New definitions: $($preprocessorDefinitionsNode.'#text')"
-        } else {
-            $newDefNode = $projXml.CreateElement("PreprocessorDefinitions", $nsManager.LookupNamespace("msbuild"))
-            $newDefNode.'#text' = "_M_X64;_WIN64"
-            $clCompileNode.AppendChild($newDefNode)
-            Write-Host "Added PreprocessorDefinitions for Release|x64 in $ProjFile."
-        }
-
-        $projXml.Save($ProjFile)
-        Write-Host "Successfully patched $ProjFile."
-    } else {
-        Write-Host "##[warning]Warning: Could not find Release|x64 configuration in $ProjFile. No patch applied."
-    }
-
-} catch {
-    Write-Host "##[error]Error patching $($ProjFile): $($_.Exception.Message)"
-    exit 1
-}
-"@
-          New-Item -Path "scripts" -ItemType Directory -Force # Ensure scripts directory exists
-          Set-Content -Path "scripts/patch.ps1" -Value $patchScriptContent
-
-      # Step 8: Patch PJSIP pjmedia_codec.vcxproj for x64 defines
+      # Step 5: Patch PJSIP pjmedia_codec.vcxproj for x64 defines
       - name: Patch PJSIP pjmedia_codec.vcxproj for x64 defines
         shell: pwsh
         run: |
-          $patch_script_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "scripts/patch.ps1"
-          # The vcxproj is now in pjmedia/build relative to the workspace root
           $pjmedia_codec_vcxproj_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "pjmedia/build/pjmedia_codec.vcxproj"
-          Write-Host "Executing patch script: $patch_script_path on $pjmedia_codec_vcxproj_path"
-          pwsh.exe -File $patch_script_path -ProjFile $pjmedia_codec_vcxproj_path
+          Write-Host "Executing patch script: scripts/patch.ps1 on $pjmedia_codec_vcxproj_path"
+          pwsh.exe -File scripts/patch.ps1 -ProjFile $pjmedia_codec_vcxproj_path # Directly call the script
 
-      # Step 9: Build PJSIP Solution
+      # Step 6: Build PJSIP Solution
       - name: Build PJSIP Solution
         shell: pwsh
         run: |
-          # The PJSIP solution file is typically `pjproject.sln` or `pjproject-vsXX.sln`
-          # Check which solution file is correct for the sufficit/pjproject repository
-          # Assuming `pjproject.sln` is at the root or in `build/vs/`.
-          # Based on documentation and common structure, `build/vs/pjproject.sln` is a safe bet for VS projects.
-          # If the main PJSIP .sln is at the root, use: $sln_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "pjproject.sln"
           $sln_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "build/vs/pjproject.sln"
+          Write-Host "Executing script: scripts/build_pjsip.ps1 with solution file: $sln_path"
+          pwsh.exe -File scripts/build_pjsip.ps1 -SlnFile $sln_path # Directly call the script
 
-          $script_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "scripts/build_pjsip.ps1"
-
-          Write-Host "Executing script: $script_path with solution file: $sln_path"
-          pwsh.exe -File $script_path -SlnFile $sln_path
-
-      # Step 10: Upload PJSIP Libraries as Artifact
+      # Step 7: Upload PJSIP Libraries as Artifact
       - name: Upload PJSIP Libraries as Artifact
         uses: actions/upload-artifact@v4
         with:
