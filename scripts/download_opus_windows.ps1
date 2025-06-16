@@ -4,7 +4,7 @@
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
 # Date: June 16, 2025
-# Version: 5
+# Version: 6
 #
 # This script downloads the latest pre-compiled Opus library for Windows from a GitHub Release,
 # extracts it, and copies the necessary .lib and .h files to the PJSIP build environment.
@@ -12,8 +12,10 @@
 # Changes:
 #   - Improved robustness for finding and copying Opus header files by ensuring recursive search
 #     and checking common 'include' subdirectories.
-#   - **Updated the warning message regarding missing headers to clarify the likely cause:
-#     the Opus release artifact itself might not contain the necessary header files.**
+#   - Updated the warning message regarding missing headers to clarify the likely cause:
+#     the Opus release artifact itself might not contain the necessary header files.
+#   - **Fixed the 'A positional parameter cannot be found that accepts argument '+' ' error**
+#     **in the Write-Warning statement by using a PowerShell here-string for the message.**
 #   - Added Set-StrictMode and ErrorActionPreference for better error handling.
 #   - Added cleanup of the temporary download directory (external_libs/opus_temp).
 # =================================================================================================
@@ -89,9 +91,12 @@ $foundOpusHeaders = Get-ChildItem -Path "$tempDownloadDir" -Filter "*.h" -Recurs
 
 # If no headers found, it's highly likely they are not included in the artifact
 if ($null -eq $foundOpusHeaders -or $foundOpusHeaders.Count -eq 0) {
-    Write-Warning "No Opus header files (*.h) were found within the extracted contents of the Opus release artifact ('$tempDownloadDir'). " + `
-                  "This indicates that the downloaded Opus release ZIP might not contain the necessary header files. " + `
-                  "Please ensure the 'sufficit/opus' release artifact includes the header files (e.g., in an 'include' or 'build-windows/include' directory)."
+    # Using a here-string for the warning message to avoid concatenation issues
+    Write-Warning @"
+No Opus header files (*.h) were found within the extracted contents of the Opus release artifact ('$tempDownloadDir').
+This indicates that the downloaded Opus release ZIP might not contain the necessary header files.
+Please ensure the 'sufficit/opus' release artifact includes the header files (e.g., in an 'include' or 'build-windows/include' directory).
+"@
 } else {
     foreach ($headerFile in $foundOpusHeaders) {
         Copy-Item -Path $headerFile.FullName -Destination $pjIncludeOpusDir
