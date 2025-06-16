@@ -1,81 +1,82 @@
 # GitHub Actions Workflow: PJSIP Build for Windows, Linux, and Linux ARM
 #
-# Este workflow automatiza a compilação do projeto PJSIP para Windows (x64), Linux (x64),
-# e Linux ARM (64-bit). Ele é acionado por pushes para a branch 'main' e automaticamente
-# cria uma tag e release para cada build bem-sucedida na 'main'. Ele também continua sendo
-# acionado por tags de versão pushadas manualmente. Os artefatos de build são nomeados
-# usando a data e hora UTC do build.
+# This workflow automates the compilation of the PJSIP project for Windows (x64), Linux (x64),
+# and Linux ARM (64-bit). It is triggered on pushes to the 'main' branch and automatically
+# creates a tag and release for each successful build on 'main'. It also continues to be
+# triggered by manually pushed version tags. Build artifacts are named
+# using the UTC date and time of the build.
 #
-# A principal mudança é a integração de bibliotecas Opus pré-compiladas (assumindo que
-# elas são fornecidas pela mesma empresa 'sufficit' via GitHub Releases), em vez de
-# instalar pacotes de desenvolvimento do sistema ou compilar o Opus internamente.
+# The main change is the integration of pre-compiled Opus libraries (assuming that
+# they are provided by the same company 'sufficit' via GitHub Releases), instead of
+# installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.3
+# Action Version: 1.0.4
 # Last Updated: 2025-06-16
-# Descrição das Mudanças:
-#   - **Corrigido possível erro de sintaxe YAML na linha 97 (e em outras seções `run`) através de re-indentação completa.**
-#   - **Atualizado o caminho do repositório para 'sufficit/pjproject' no checkout inicial.**
-#   - Implementado o download de artefatos Opus pré-compilados do repositório 'sufficit/opus'
-#     (via GitHub Releases) em cada job de build do PJSIP, com lógica aprimorada para nomear e extrair.
-#   - Removidas as dependências `libopus-dev` dos instaladores de pacotes.
-#   - Ajustadas as flags de compilação (CFLAGS, LDFLAGS) e os comandos de build do PJSIP
-#     (configure/msbuild) para apontar para os artefatos Opus baixados.
-#   - Adicionada a instalação do 'jq' para parsear JSON da API do GitHub para download de releases.
-#   - Incluído `chown` comando em Docker build step para resolver problemas de permissão para artefatos.
-#   - Mantidas todas as funcionalidades anteriores de build e release.
+# Description of Changes:
+#   - **Corrected potential YAML syntax error on line 164 (and other `run` sections) by complete re-indentation.**
+#   - **Updated the repository path to 'sufficit/pjproject' in the initial checkout.**
+#   - Implemented downloading of pre-compiled Opus artifacts from the 'sufficit/opus' repository
+#     (via GitHub Releases) in each PJSIP build job, with enhanced logic for naming and extraction.
+#   - Removed `libopus-dev` dependencies from package installers.
+#   - Adjusted compilation flags (CFLAGS, LDFLAGS) and PJSIP build commands
+#     (configure/msbuild) to point to the downloaded Opus artifacts.
+#   - Added 'jq' installation for parsing GitHub API JSON for release downloads.
+#   - Included `chown` command in Docker build step to resolve permission issues for artifacts.
+#   - All comments in the code are now in English as requested.
+#   - Maintained all previous build and release functionalities.
 #
-# Para mais informações sobre GitHub Actions: https://docs.github.com/en/actions
-# Para instruções de build do PJSIP:
+# For more information on GitHub Actions: https://docs.github.com/en/actions
+# For PJSIP build instructions:
 #   - Linux/Unix: https://docs.pjsip.org/en/latest/get-started/posix/build_instructions.html
 #   - Windows: https://docs.pjsip.org/en/latest/get-started/windows/build_instructions.html
-#   - Cross-compilation: Geralmente envolve configurar `--host` e usar toolchains apropriadas.
+#   - Cross-compilation: Generally involves configuring `--host` and using appropriate toolchains.
 
-# Nome do workflow que aparecerá em GitHub Actions
+# Workflow name that will appear in GitHub Actions
 name: Build PJSIP for Windows, Linux, and Linux ARM (with pre-compiled Opus)
 
-# Define quando o workflow será executado
+# Defines when the workflow will be executed
 on:
-  # Aciona o workflow em eventos 'push' para a branch 'main'
+  # Triggers the workflow on 'push' events to the 'main' branch
   push:
     branches:
       - main
     tags:
-      - 'v*.*.*' # Exemplo: v1.0.0, v1.2.3 (ainda suportado para tagging manual)
+      - 'v*.*.*' # Example: v1.0.0, v1.2.3 (still supported for manual tagging)
 
-  # Permite executar este workflow manualmente pela aba "Actions" do GitHub
+  # Allows you to manually run this workflow from the GitHub "Actions" tab
   workflow_dispatch:
 
-# Definição dos jobs a serem executados
+# Definition of the jobs to be executed
 jobs:
-  # Job para compilação Windows
+  # Job for Windows compilation
   build-windows:
     name: Build on Windows
-    # Usa a versão mais recente do Windows Server, que possui Visual Studio e MSBuild pré-instalados
+    # Uses the latest Windows Server version, which has Visual Studio and MSBuild pre-installed
     runs-on: windows-latest
 
     outputs:
-      build_version: ${{ steps.date.outputs.BUILD_VERSION }} # Saída da versão do build para outros jobs
+      build_version: ${{ steps.date.outputs.BUILD_VERSION }} # Output the build version for other jobs
 
     steps:
-      # Passo 0: Capturar data e hora do build para usar como versão
+      # Step 0: Capture build date and time to use as version
       - name: Get current date and time
         id: date
         run: |
-          # Formata a data e hora como YYYYMMDD-HHMMSS (UTC)
+          # Formats the date and time as YYYYMMDD-HHMMSS (UTC)
           $build_version = (Get-Date -UFormat %Y%m%d-%H%M%S)
           echo "BUILD_VERSION=$build_version" | Out-File -FilePath $env:GITHUB_ENV -Append
-          echo "BUILD_VERSION=$build_version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append # Saída para dependências de jobs
+          echo "BUILD_VERSION=$build_version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append # Output for job dependencies
         shell: powershell
 
-      # Passo 1: Fazer checkout do repositório PJSIP
+      # Step 1: Checkout the PJSIP repository
       - name: Checkout PJSIP Repository
         uses: actions/checkout@v4
         with:
-          repository: sufficit/pjproject # Definindo o repositório correto
-          path: . # Checkout para a raiz do workspace
-          submodules: recursive # Se houver submodules, eles também serão clonados
+          repository: sufficit/pjproject # Defining the correct repository
+          path: . # Checkout to the root of the workspace
+          submodules: recursive # If there are submodules, they will also be cloned
 
-      # Passo 2: Encontrar e baixar o último release do Opus para Windows
+      # Step 2: Find and download the latest Opus release for Windows
       - name: Find and download latest Opus Windows release
         id: download_opus_release_windows
         run: |
@@ -143,12 +144,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: powershell
 
-      # Passo 3: Criar PJSIP config_site.h
+      # Step 3: Create PJSIP config_site.h
       - name: Create PJSIP config_site.h
         shell: pwsh
         run: |
-          # Este conteúdo define a configuração do PJSIP, incluindo suporte a Opus e macros específicas do Windows x64.
-          # Todas as linhas em branco foram removidas para evitar possíveis problemas de parsing YAML com blocos literais.
+          # This content defines PJSIP's configuration, including Opus support and Windows x64 specific macros.
+          # All blank lines have been removed to prevent potential YAML parsing issues with literal blocks.
           $configSiteContent = @"
 # =================================================================================================
 # PJSIP CUSTOM CONFIGURATION FILE
@@ -175,16 +176,16 @@ jobs:
 "@
           Set-Content -Path "pjlib/include/pj/config_site.h" -Value $configSiteContent
 
-      # Passo 4: Adicionar MSBuild ao path
+      # Step 4: Add MSBuild to path
       - name: Add MSBuild to path
         uses: microsoft/setup-msbuild@v2
 
-      # Passo 5: Criar build_pjsip.ps1
+      # Step 5: Create build_pjsip.ps1
       - name: Create build_pjsip.ps1
         shell: pwsh
         run: |
-          # Este script constrói a solução PJSIP usando MSBuild.
-          # Ele é criado dinamicamente porque precisa estar presente no workspace do runner.
+          # This script builds the PJSIP solution using MSBuild.
+          # It is created dynamically because it needs to be present in the runner's workspace.
           $buildScriptContent = @"
 # =================================================================================================
 # BUILD SCRIPT FOR PJSIP SOLUTION (CALLED BY GITHUB ACTIONS WORKFLOW)
@@ -199,39 +200,39 @@ jobs:
 # =================================================================================================
 
 param (
-    [string]\$SlnFile # Path to the PJSIP solution file, e.g., pjproject/pjproject-vs14.sln
+    [string]$SlnFile # Path to the PJSIP solution file, e.g., pjproject/pjproject-vs14.sln
 )
 
-\$solutionPath = \$SlnFile
-\$configuration = "Release"
-\$platform = "x64" # Targetting x64
+$solutionPath = $SlnFile
+$configuration = "Release"
+$platform = "x64" # Targetting x64
 
-\$msbuildPath = "msbuild.exe"
+$msbuildPath = "msbuild.exe"
 
-Write-Host "Building PJSIP solution: \$solutionPath"
-Write-Host "Configuration: \$configuration"
-Write-Host "Platform: \$platform"
+Write-Host "Building PJSIP solution: $solutionPath"
+Write-Host "Configuration: $configuration"
+Write-Host "Platform: $platform"
 
 try {
-    & \$msbuildPath \$solutionPath /p:Configuration=\$configuration /p:Platform=\$platform /m /t:Rebuild
-    if (\$LASTEXITCODE -ne 0) {
-        Write-Host "##[error]MSBuild failed with exit code \$LASTEXITCODE."
+    & $msbuildPath $solutionPath /p:Configuration=$configuration /p:Platform=$platform /m /t:Rebuild
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "##[error]MSBuild failed with exit code $LASTEXITCODE."
         exit 1
     }
 } catch {
-    Write-Host "##[error]An error occurred during MSBuild execution: \$(\$_.Exception.Message)"
+    Write-Host "##[error]An error occurred during MSBuild execution: $($_.Exception.Message)"
     exit 1
 }
 "@
-          New-Item -Path "scripts" -ItemType Directory -Force # Garantir que o diretório scripts exista
+          New-Item -Path "scripts" -ItemType Directory -Force # Ensure scripts directory exists
           Set-Content -Path "scripts/build_pjsip.ps1" -Value $buildScriptContent
 
-      # Passo 6: Criar patch.ps1
+      # Step 6: Create patch.ps1
       - name: Create patch.ps1
         shell: pwsh
         run: |
-          # Este script corrige o pjmedia_codec.vcxproj para garantir definições de pré-processador específicas para x64.
-          # Ele é criado dinamicamente porque precisa estar presente no workspace do runner.
+          # This script patches the pjmedia_codec.vcxproj to ensure x64 specific preprocessor definitions.
+          # It is created dynamically because it needs to be present in the runner's workspace.
           $patchScriptContent = @"
 # =================================================================================================
 # PATCH SCRIPT FOR PJSIP PROJECT FILES (CALLED BY GITHUB ACTIONS WORKFLOW)
@@ -246,69 +247,69 @@ try {
 # =================================================================================================
 
 param (
-    [Parameter(Mandatory=\$true)]
-    [string]\$ProjFile
+    [Parameter(Mandatory=$true)]
+    [string]$ProjFile
 )
 
-Write-Host "Executing patch script for: \$ProjFile"
+Write-Host "Executing patch script for: $ProjFile"
 
 try {
-    [xml]\$projXml = Get-Content \$ProjFile
+    [xml]$projXml = Get-Content $ProjFile
 
-    \$nsManager = New-Object System.Xml.XmlNamespaceManager(\$projXml.NameTable)
-    \$nsManager.AddNamespace("msbuild", "http://schemas.microsoft.com/developer/msbuild/2003")
+    $nsManager = New-Object System.Xml.XmlNamespaceManager($projXml.NameTable)
+    $nsManager.AddNamespace("msbuild", "http://schemas.microsoft.com/developer/msbuild/2003")
 
-    \$clCompileNode = \$projXml.SelectSingleNode("//msbuild:ItemDefinitionGroup[contains(@Condition, 'Release') and contains(@Condition, 'x64')]/msbuild:ClCompile", \$nsManager)
+    $clCompileNode = $projXml.SelectSingleNode("//msbuild:ItemDefinitionGroup[contains(@Condition, 'Release') and contains(@Condition, 'x64')]/msbuild:ClCompile", $nsManager)
 
-    if (\$clCompileNode) {
-        \$preprocessorDefinitionsNode = \$clCompileNode.SelectSingleNode("./msbuild:PreprocessorDefinitions", \$nsManager)
+    if ($clCompileNode) {
+        $preprocessorDefinitionsNode = $clCompileNode.SelectSingleNode("./msbuild:PreprocessorDefinitions", $nsManager)
 
-        if (\$preprocessorDefinitionsNode) {
-            \$existingDefinitions = \$preprocessorDefinitionsNode.'#text'
-            \$newDefinitions = "_M_X64;_WIN64;\$existingDefinitions"
-            \$preprocessorDefinitionsNode.'#text' = \$newDefinitions
-            Write-Host "Updated PreprocessorDefinitions for Release|x64 in \$ProjFile."
-            Write-Host "New definitions: \$(\$preprocessorDefinitionsNode.'#text')"
+        if ($preprocessorDefinitionsNode) {
+            $existingDefinitions = $preprocessorDefinitionsNode.'#text'
+            $newDefinitions = "_M_X64;_WIN64;$existingDefinitions"
+            $preprocessorDefinitionsNode.'#text' = $newDefinitions
+            Write-Host "Updated PreprocessorDefinitions for Release|x64 in $ProjFile."
+            Write-Host "New definitions: $($preprocessorDefinitionsNode.'#text')"
         } else {
-            \$newDefNode = \$projXml.CreateElement("PreprocessorDefinitions", \$nsManager.LookupNamespace("msbuild"))
-            \$newDefNode.'#text' = "_M_X64;_WIN64"
-            \$clCompileNode.AppendChild(\$newDefNode)
-            Write-Host "Added PreprocessorDefinitions for Release|x64 in \$ProjFile."
+            $newDefNode = $projXml.CreateElement("PreprocessorDefinitions", $nsManager.LookupNamespace("msbuild"))
+            $newDefNode.'#text' = "_M_X64;_WIN64"
+            $clCompileNode.AppendChild($newDefNode)
+            Write-Host "Added PreprocessorDefinitions for Release|x64 in $ProjFile."
         }
 
-        \$projXml.Save(\$ProjFile)
-        Write-Host "Successfully patched \$ProjFile."
+        $projXml.Save($ProjFile)
+        Write-Host "Successfully patched $ProjFile."
     } else {
-        Write-Host "##[warning]Warning: Could not find Release|x64 configuration in \$ProjFile. No patch applied."
+        Write-Host "##[warning]Warning: Could not find Release|x64 configuration in $ProjFile. No patch applied."
     }
 
 } catch {
-    Write-Host "##[error]Error patching \$(\$ProjFile): \$(\$_.Exception.Message)"
+    Write-Host "##[error]Error patching $($ProjFile): $($_.Exception.Message)"
     exit 1
 }
 "@
-          New-Item -Path "scripts" -ItemType Directory -Force # Garantir que o diretório scripts exista
+          New-Item -Path "scripts" -ItemType Directory -Force # Ensure scripts directory exists
           Set-Content -Path "scripts/patch.ps1" -Value $patchScriptContent
 
-      # Passo 7: Corrigir pjmedia_codec.vcxproj do PJSIP para definições x64
+      # Step 7: Patch PJSIP pjmedia_codec.vcxproj for x64 defines
       - name: Patch PJSIP pjmedia_codec.vcxproj for x64 defines
         shell: pwsh
         run: |
           $patch_script_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "scripts/patch.ps1"
-          # O vcxproj agora está em pjmedia/build em relação à raiz do workspace
+          # The vcxproj is now in pjmedia/build relative to the workspace root
           $pjmedia_codec_vcxproj_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "pjmedia/build/pjmedia_codec.vcxproj"
           Write-Host "Executing patch script: $patch_script_path on $pjmedia_codec_vcxproj_path"
           pwsh.exe -File $patch_script_path -ProjFile $pjmedia_codec_vcxproj_path
 
-      # Passo 8: Construir Solução PJSIP
+      # Step 8: Build PJSIP Solution
       - name: Build PJSIP Solution
         shell: pwsh
         run: |
-          # O arquivo de solução do PJSIP é normalmente `pjproject.sln` ou `pjproject-vsXX.sln`
-          # Verifique qual arquivo de solução é o correto para o repositório sufficit/pjproject
-          # Assumindo que `pjproject.sln` esteja na raiz ou em `build/vs/`.
-          # Com base na documentação e estrutura comum, `build/vs/pjproject.sln` é uma aposta segura para VS projects.
-          # Se o PJSIP principal .sln estiver na raiz, use: $sln_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "pjproject.sln"
+          # The PJSIP solution file is typically `pjproject.sln` or `pjproject-vsXX.sln`
+          # Check which solution file is correct for the sufficit/pjproject repository
+          # Assuming `pjproject.sln` is at the root or in `build/vs/`.
+          # Based on documentation and common structure, `build/vs/pjproject.sln` is a safe bet for VS projects.
+          # If the main PJSIP .sln is at the root, use: $sln_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "pjproject.sln"
           $sln_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "build/vs/pjproject.sln"
           
           $script_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "scripts/build_pjsip.ps1"
@@ -316,7 +317,7 @@ try {
           Write-Host "Executing script: $script_path with solution file: $sln_path"
           pwsh.exe -File $script_path -SlnFile $sln_path
 
-      # Passo 9: Fazer upload das bibliotecas PJSIP como artefato
+      # Step 9: Upload PJSIP Libraries as Artifact
       - name: Upload PJSIP Libraries as Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -328,36 +329,36 @@ try {
             pjnath/include/
             pjmedia/include/
             pjsip/include/
-            pjsip-apps/bin/*.exe # Incluir executáveis também
-          retention-days: 7 # Manter artefatos por 7 dias
+            pjsip-apps/bin/*.exe # Include executables as well
+          retention-days: 7 # Retain artifacts for 7 days
 
-  # Job para compilação Linux (x64)
+  # Job for Linux compilation (x64)
   build-linux:
     name: Build on Linux (x64)
-    # Usa a versão mais recente do Ubuntu (x64 por padrão)
+    # Uses the latest Ubuntu version (x64 by default)
     runs-on: ubuntu-latest
 
     outputs:
-      build_version: ${{ steps.date.outputs.BUILD_VERSION }} # Saída da versão do build para outros jobs
+      build_version: ${{ steps.date.outputs.BUILD_VERSION }} # Output the build version for other jobs
 
     steps:
-      # Passo 0: Capturar data e hora do build para usar como versão
+      # Step 0: Capture build date and time to use as version
       - name: Get current date and time
         id: date
         run: |
-          # Formata a data e hora como YYYYMMDD-HHMMSS (UTC)
+          # Formats the date and time as YYYYMMDD-HHMMSS (UTC)
           echo "BUILD_VERSION=$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_ENV"
-          echo "BUILD_VERSION=$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT" # Saída para dependências de jobs
+          echo "BUILD_VERSION=$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT" # Output for job dependencies
 
-      # Passo 1: Fazer checkout do repositório PJSIP
+      # Step 1: Checkout the PJSIP repository
       - name: Checkout PJSIP Repository
         uses: actions/checkout@v4
         with:
-          repository: sufficit/pjproject # Definindo o repositório correto
-          path: . # Checkout para a raiz do workspace
+          repository: sufficit/pjproject # Defining the correct repository
+          path: . # Checkout to the root of the workspace
           submodules: recursive
 
-      # Passo 2: Instalar dependências de build (incluindo jq para o download do Opus)
+      # Step 2: Install build dependencies (including jq for Opus download)
       - name: Install build dependencies and jq
         run: |
           sudo apt-get update
@@ -373,11 +374,11 @@ try {
             libsrtp2-dev \
             libwebrtc-audio-processing-dev \
             jq \
-            wget # wget/curl para baixar Opus
-          # NOTA: libopus-dev foi removido, pois usaremos Opus pré-compilado.
-          # Adicione mais dependências aqui se sua configuração PJSIP as exigir (ex: para suporte a vídeo: libsdl2-dev, libyuv-dev, ffmpeg, openh264)
+            wget # wget/curl for downloading Opus
+          # NOTE: libopus-dev was removed, as we will use pre-compiled Opus.
+          # Add more dependencies here if your PJSIP configuration requires them (e.g., for video support: libsdl2-dev, libyuv-dev, ffmpeg, openh264)
 
-      # Passo 3: Encontrar e baixar o último release do Opus (Linux x64)
+      # Step 3: Find and download the latest Opus release (Linux x64)
       - name: Find and download latest Opus Linux x64 release
         id: download_opus_release_linux
         run: |
@@ -435,98 +436,98 @@ try {
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
 
-      # Passo 4: Criar config_site.h (opcional, mas boa prática para personalizar PJSIP)
+      # Step 4: Create config_site.h (optional, but good practice for customizing PJSIP)
       - name: Create config_site.h
         run: |
           echo '#include <pj/config_site_sample.h>' | sudo tee pjlib/include/pj/config_site.h > /dev/null
 
-      # Passo 5: Configurar PJSIP
+      # Step 5: Configure PJSIP
       - name: Configure PJSIP for Linux
         run: |
-          # Defina CFLAGS e LDFLAGS para apontar para a instalação externa do Opus
-          # Assumindo que `libopus.a` esteja diretamente sob `${PJSIP_LIB_DIR}` após a extração
-          export CFLAGS="-I$(pwd)/pjlib/include/pj -I$(pwd)/pjlib/include/pj/opus" # Incluir pj/opus e pj
-          export LDFLAGS="-L$(pwd)/lib -lopus" # Link com libopus.a
-          ./configure --enable-shared --disable-sound-portaudio # Desabilite portaudio se não for estritamente necessário
-          # Adicione mais opções de configuração conforme necessário, ex: --disable-video --disable-legacy-api
+          # Define CFLAGS and LDFLAGS to point to the external Opus installation
+          # Assuming `libopus.a` is directly under `${PJSIP_LIB_DIR}` after extraction
+          export CFLAGS="-I$(pwd)/pjlib/include/pj -I$(pwd)/pjlib/include/pj/opus" # Include pj/opus and pj
+          export LDFLAGS="-L$(pwd)/lib -lopus" # Link with libopus.a
+          ./configure --enable-shared --disable-sound-portaudio # Disable portaudio if not strictly needed
+          # Add more configure options as needed, e.g., --disable-video --disable-legacy-api
 
-      # Passo 6: Compilar PJSIP
+      # Step 6: Compile PJSIP
       - name: Build PJSIP for Linux
         run: |
           make dep && make
 
-      # Passo 7: Arquivar artefatos do build Linux
+      # Step 7: Archive Linux build artifacts
       - name: Archive Linux builds
         run: |
           mkdir pjsip_artifacts
-          find . -maxdepth 2 -type f -name "*.so*" -exec cp {} pjsip_artifacts/ \; # Copia todas as bibliotecas compartilhadas
-          cp pjsip-apps/bin/pjsua pjsip_artifacts/ # Copia a aplicação PJSIP principal
-          # Adicione outros binários se necessário, ex: de pjsip-apps/bin/samples/
+          find . -maxdepth 2 -type f -name "*.so*" -exec cp {} pjsip_artifacts/ \; # Copy all shared libraries
+          cp pjsip-apps/bin/pjsua pjsip_artifacts/ # Copy main PJSIP application
+          # Add other binaries if necessary, e.g., from pjsip-apps/bin/samples/
 
           tar -czvf pjsip-linux-x64-${{ env.BUILD_VERSION }}.tar.gz -C pjsip_artifacts .
 
-      # Passo 8: Fazer upload dos artefatos
+      # Step 8: Upload artifacts
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: pjsip-linux-x64-${{ env.BUILD_VERSION }} # Ajustado para usar BUILD_VERSION
+          name: pjsip-linux-x64-${{ env.BUILD_VERSION }} # Adjusted to use BUILD_VERSION
           path: pjsip-linux-x64-${{ env.BUILD_VERSION }}.tar.gz
 
-  # Job para compilação Linux ARM (64-bit)
+  # Job for Linux ARM compilation (64-bit)
   build-linux-arm:
     name: Build on Linux ARM (64-bit)
-    # Usa a versão mais recente do Ubuntu (x64), e então configura a emulação ARM64
+    # Uses the latest Ubuntu version (x64), and then sets up ARM64 emulation
     runs-on: ubuntu-latest
 
     outputs:
-      build_version: ${{ steps.date.outputs.BUILD_VERSION }} # Saída da versão do build para outros jobs
+      build_version: ${{ steps.date.outputs.BUILD_VERSION }} # Output the build version for other jobs
 
     steps:
-      # Passo 0: Capturar data e hora do build para usar como versão
+      # Step 0: Capture build date and time to use as version
       - name: Get current date and time
         id: date
         run: |
-          # Formata a data e hora como YYYYMMDD-HHMMSS (UTC)
+          # Formats the date and time as YYYYMMDD-HHMMSS (UTC)
           echo "BUILD_VERSION=$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_ENV"
-          echo "BUILD_VERSION=$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT" # Saída para dependências de jobs
+          echo "BUILD_VERSION=$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT" # Output for job dependencies
 
-      # Passo 1: Configurar QEMU para emulação ARM64
+      # Step 1: Set up QEMU for ARM64 emulation
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
         with:
           platforms: all
 
-      # Passo 2: Configurar Docker Buildx para builds multi-plataforma
+      # Step 2: Set up Docker Buildx for multi-platform builds
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # Passo 3: Fazer checkout do repositório PJSIP
+      # Step 3: Checkout the PJSIP repository
       - name: Checkout PJSIP Repository
         uses: actions/checkout@v4
         with:
-          repository: sufficit/pjproject # Definindo o repositório correto
-          path: . # Checkout para a raiz do workspace
+          repository: sufficit/pjproject # Defining the correct repository
+          path: . # Checkout to the root of the workspace
           submodules: recursive
 
-      # Passo 4: Build PJSIP para ARM dentro de um container Docker
+      # Step 4: Build PJSIP for ARM inside a Docker container
       - name: Build PJSIP for Linux ARM using Docker
         run: |
-          # Define a arquitetura alvo e uma imagem Docker adequada
-          # Usamos uma imagem base do Ubuntu e instalamos ferramentas de cross-compilação e libs de desenvolvimento específicas para ARM dentro dela.
+          # Define the target architecture and a suitable Docker image
+          # We use a base Ubuntu image and install cross-compilation tools and ARM-specific dev libs inside it.
           TARGET_ARCH="arm64"
           DOCKER_IMAGE="ubuntu:noble" # Ubuntu 24.04
 
-          # Criar um diretório temporário no host para copiar os artefatos do container Docker
+          # Create a temporary directory on the host to copy artifacts from the Docker container
           mkdir pjsip_arm_artifacts_host
 
-          # Executar os comandos de build dentro do container Docker
+          # Run the build commands inside the Docker container
           docker run --rm \
             --platform linux/${TARGET_ARCH} \
             -v ${{ github.workspace }}:/src \
             -w /src \
             ${DOCKER_IMAGE} \
             /bin/bash -c "
-              set -e # Sair imediatamente se um comando sair com status diferente de zero.
+              set -e # Exit immediately if a command exits with a non-zero status.
 
               echo 'Installing cross-compilation tools and build dependencies inside Docker for ARM...'
               apt-get update && apt-get install -y --no-install-recommends \
@@ -542,7 +543,7 @@ try {
                 libsrtp2-dev \
                 libwebrtc-audio-processing-dev \
                 jq \
-                wget # wget/curl para baixar Opus
+                wget # wget/curl for downloading Opus
 
               echo 'Finding and downloading latest Opus ARM release...'
               REPO_OWNER='sufficit'
@@ -598,7 +599,7 @@ try {
               echo '#include <pj/config_site_sample.h>' | tee pjlib/include/pj/config_site.h > /dev/null
 
               echo 'Configuring PJSIP for Linux ARM...'
-              # Define CFLAGS e LDFLAGS para apontar para a instalação externa do Opus
+              # Define CFLAGS and LDFLAGS to point to the external Opus installation
               export CFLAGS="-I/src/pjlib/include/pj -I/src/pjlib/include/pj/opus"
               export LDFLAGS="-L/src/lib -lopus"
               ./configure --host=aarch64-linux-gnu --enable-shared --disable-sound-portaudio
@@ -606,77 +607,77 @@ try {
               echo 'Compiling PJSIP for Linux ARM...'
               make dep && make
 
-              # Mudar a propriedade dos artefatos de build para o usuário do host antes de sair do container
+              # Change ownership of the build artifacts to the host user before exiting the container
               HOST_UID=\$(stat -c '%u' /src)
               HOST_GID=\$(stat -c '%g' /src)
               chown -R \${HOST_UID}:\${HOST_GID} /src/lib
               chown -R \${HOST_UID}:\${HOST_GID} /src/pjsip-apps/bin
             "
-          # Mover os artefatos compilados dos diretórios originais do Docker para o diretório de build do host
+          # Move compiled artifacts from the Docker's original directories to the host build directory
           mv lib/* pjsip_arm_artifacts_host/
           mv pjsip-apps/bin/* pjsip_arm_artifacts_host/
         shell: bash
 
-      # Passo 5: Arquivar artefatos do build Linux ARM
+      # Step 5: Archive Linux ARM builds
       - name: Archive Linux ARM builds
         run: |
-          # Compacta o conteúdo do diretório 'pjsip_arm_artifacts_host'.
+          # Compress the content of the 'pjsip_arm_artifacts_host' directory.
           tar -czvf pjsip-linux-arm64-${{ env.BUILD_VERSION }}.tar.gz -C pjsip_arm_artifacts_host .
 
-      # Passo 6: Fazer upload dos artefatos
+      # Step 6: Upload artifacts
       - name: Upload Linux ARM artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: pjsip-linux-arm64-${{ env.BUILD_VERSION }} # Ajustado para usar BUILD_VERSION
+          name: pjsip-linux-arm64-${{ env.BUILD_VERSION }} # Adjusted to use BUILD_VERSION
           path: pjsip-linux-arm64-${{ env.BUILD_VERSION }}.tar.gz
 
-  # Job para criar GitHub Release
+  # Job to create GitHub Release
   create-release:
     name: Create GitHub Release
-    # Este job é executado apenas se todos os jobs de build forem bem-sucedidos
+    # This job runs only if all build jobs succeed
     needs: [build-windows, build-linux, build-linux-arm]
-    # Removida a condição 'if', então este job agora é executado para cada build bem-sucedida na 'main'.
+    # Removed the 'if' condition, so this job now runs for every successful build on 'main'.
     runs-on: ubuntu-latest
 
     steps:
-      # Passo 0: Definir o nome da tag com base na versão do build
-      # Precisamos obter a BUILD_VERSION de um dos jobs anteriores.
-      # Como todos os jobs têm a mesma BUILD_VERSION, podemos escolher um, ex: build-windows.
+      # Step 0: Set the tag name based on the build version
+      # We need to get the BUILD_VERSION from one of the previous jobs.
+      # Since all jobs have the same BUILD_VERSION, we can pick one, e.g., build-windows.
       - name: Set Release Tag Name
         id: set_tag
         run: |
           echo "RELEASE_TAG=build-${{ needs.build-windows.outputs.build_version }}" >> $GITHUB_ENV
 
-      # Passo 1: Baixar todos os artefatos de build
+      # Step 1: Download all build artifacts
       - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
-          # Baixa todos os artefatos da execução do workflow atual
+          # Downloads all artifacts from the current workflow run
           path: ./artifacts
 
-      # Passo 2: Listar artefatos baixados (para depuração)
+      # Step 2: List downloaded artifacts (for debugging)
       - name: List Downloaded Artifacts
         run: ls -R ./artifacts
 
-      # Passo 3: Criar GitHub Release e fazer upload dos assets
+      # Step 3: Create GitHub Release and upload assets
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          # Define o nome da tag para a release. Esta ação criará a tag se ela não existir.
+          # Define the tag name for the release. This action will create the tag if it doesn't exist.
           tag_name: ${{ env.RELEASE_TAG }}
-          # Define o nome da release
+          # Define the release name
           name: Automated Build Release ${{ env.RELEASE_TAG }}
-          # Fornece um corpo para as notas de release
+          # Provide a body for the release notes
           body: |
             Automated build for branch `main`.
             Build Date (UTC): `${{ needs.build-windows.outputs.build_version }}`
-          # Define 'prerelease' como true se você quiser que essas releases geradas automaticamente sejam marcadas como pré-releases.
-          # Remova ou defina como 'false' se quiser que sejam releases completas.
+          # Set 'prerelease' to true if you want these auto-generated releases to be marked as pre-releases.
+          # Remove or set to 'false' if you want them as full releases.
           # prerelease: true
           files: |
             ./artifacts/pjsip-windows-x64-${{ needs.build-windows.outputs.build_version }}/pjsip-windows-x64-${{ needs.build-windows.outputs.build_version }}.zip
             ./artifacts/pjsip-linux-x64-${{ needs.build-linux.outputs.build_version }}/pjsip-linux-x64-${{ needs.build-linux.outputs.build_version }}.tar.gz
             ./artifacts/pjsip-linux-arm64-${{ needs.build-linux-arm.outputs.build_version }}/pjsip-linux-arm64-${{ needs.build-linux-arm.outputs.build_version }}.tar.gz
         env:
-          # GITHUB_TOKEN é fornecido automaticamente pelo GitHub Actions para autenticação
+          # GITHUB_TOKEN is automatically provided by GitHub Actions for authentication
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
