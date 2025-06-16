@@ -10,10 +10,10 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.6
+# Action Version: 1.0.9
 # Last Updated: 2025-06-16
 # Description of Changes:
-#   - **Corrected YAML syntax error on line 165 (and throughout `run` blocks) by ensuring consistent indentation.**
+#   - **Extracted PowerShell scripts into separate .ps1 files within the 'scripts' directory.**
 #   - **Ensured all comments in the code are in English.**
 #   - Updated the repository path to 'sufficit/pjproject' in the initial checkout.
 #   - Implemented downloading of pre-compiled Opus artifacts from the 'sufficit/opus' repository
@@ -76,75 +76,99 @@ jobs:
           path: . # Checkout to the root of the workspace
           submodules: recursive # If there are submodules, they will also be cloned
 
-      # Step 2: Find and download the latest Opus release for Windows
+      # Step 2: Create download_opus_windows.ps1
+      - name: Create download_opus_windows.ps1
+        shell: pwsh
+        run: |
+          # This script handles the download and extraction of pre-compiled Opus libraries for Windows.
+          # It fetches the latest Opus release from GitHub and copies necessary files to PJSIP's directories.
+          $downloadOpusScriptContent = @"
+# =================================================================================================
+# DOWNLOAD OPUS SCRIPT FOR WINDOWS (CALLED BY GITHUB ACTIONS WORKFLOW)
+#
+# Author: Hugo Castro de Deco, Sufficit
+# Collaboration: Gemini AI for Google
+# Date: June 15, 2025
+# Version: 1
+#
+# This script downloads the latest pre-compiled Opus library for Windows from a GitHub Release,
+# extracts it, and copies the necessary .lib and .h files to the PJSIP build environment.
+# =================================================================================================
+
+$REPO_OWNER="sufficit"
+$REPO_NAME="opus"
+$ARTIFACT_PREFIX="opus-windows-x64"
+$ARTIFACT_EXT=".zip"
+
+Write-Host "Fetching latest release tag from https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest"
+$LATEST_RELEASE_DATA = Invoke-RestMethod -Uri "https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest" -Headers @{Authorization = "token $env:GITHUB_TOKEN"} -ErrorAction Stop
+
+$LATEST_RELEASE_TAG = $LATEST_RELEASE_DATA.tag_name
+if (-not $LATEST_RELEASE_TAG) {
+  Write-Host "##[error]Error: Could not find latest release tag for ${REPO_OWNER}/${REPO_NAME}"
+  exit 1
+}
+Write-Host "Found latest Opus release tag: $LATEST_RELEASE_TAG"
+
+$OPUS_BUILD_VERSION = ($LATEST_RELEASE_TAG -replace "build-", "") # Assumes tag is 'build-YYYYMMDD-HHMMSS'
+$EXPECTED_ARTIFACT_NAME = "${ARTIFACT_PREFIX}-${OPUS_BUILD_VERSION}${ARTIFACT_EXT}"
+Write-Host "Expected artifact name: $EXPECTED_ARTIFACT_NAME"
+
+$DOWNLOAD_URL = $LATEST_RELEASE_DATA.assets | Where-Object { $_.name -eq $EXPECTED_ARTIFACT_NAME } | Select-Object -ExpandProperty browser_download_url
+if (-not $DOWNLOAD_URL) {
+  Write-Host "##[error]Error: Could not find download URL for artifact $EXPECTED_ARTIFACT_NAME in release $LATEST_RELEASE_TAG"
+  exit 1
+}
+Write-Host "Downloading Opus artifact from: $DOWNLOAD_URL"
+
+New-Item -ItemType Directory -Path "external_libs/opus_temp" -Force
+$zipPath = Join-Path -Path "external_libs/opus_temp" -ChildPath $EXPECTED_ARTIFACT_NAME
+
+Invoke-WebRequest -Uri $DOWNLOAD_URL -OutFile $zipPath
+
+Write-Host "Extracting $zipPath to external_libs/opus_temp/"
+Expand-Archive -Path $zipPath -DestinationPath "external_libs/opus_temp/" -Force
+
+# Copy opus.lib to PJSIP's lib directory
+$pjsipLibDir = "lib"
+New-Item -ItemType Directory -Path $pjsipLibDir -Force
+
+$foundOpusLib = Get-ChildItem -Path "external_libs/opus_temp" -Filter "opus.lib" -Recurse | Select-Object -First 1
+
+if ($foundOpusLib) {
+    Copy-Item -Path $foundOpusLib.FullName -Destination $pjsipLibDir
+    Write-Host "Copied opus.lib from $($foundOpusLib.FullName) to $pjsipLibDir"
+} else {
+    Write-Host "##[error]Error: opus.lib not found within the extracted contents of the Opus release. Please check the structure."
+    exit 1
+}
+
+# Copy Opus headers to PJSIP's pjlib/include/pj/opus directory
+$pjIncludeOpusDir = "pjlib/include/pj/opus"
+New-Item -ItemType Directory -Path $pjIncludeOpusDir -Force
+
+$foundOpusHeadersPath = Get-ChildItem -Path "external_libs/opus_temp" -Filter "opus.h" -Recurse | Select-Object -ExpandProperty DirectoryName | Select-Object -First 1
+
+if ($foundOpusHeadersPath) {
+    Copy-Item -Path (Join-Path -Path $foundOpusHeadersPath -ChildPath "*.h") -Destination $pjIncludeOpusDir
+    Write-Host "Copied Opus headers from $($foundOpusHeadersPath) to $pjIncludeOpusDir"
+} else {
+    Write-Host "##[warning]Warning: Opus 'opus.h' header file not found within extracted contents. Headers might be missing."
+}
+"@
+          New-Item -Path "scripts" -ItemType Directory -Force # Ensure scripts directory exists
+          Set-Content -Path "scripts/download_opus_windows.ps1" -Value $downloadOpusScriptContent
+
+      # Step 3: Find and download the latest Opus release for Windows (Execute script)
       - name: Find and download latest Opus Windows release
         id: download_opus_release_windows
         run: |
-          $REPO_OWNER="sufficit"
-          $REPO_NAME="opus"
-          $ARTIFACT_PREFIX="opus-windows-x64"
-          $ARTIFACT_EXT=".zip"
-
-          Write-Host "Fetching latest release tag from https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest"
-          $LATEST_RELEASE_DATA = Invoke-RestMethod -Uri "https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest" -Headers @{Authorization = "token ${{ secrets.GITHUB_TOKEN }}"} -ErrorAction Stop
-
-          $LATEST_RELEASE_TAG = $LATEST_RELEASE_DATA.tag_name
-          if (-not $LATEST_RELEASE_TAG) {
-            Write-Host "##[error]Error: Could not find latest release tag for ${REPO_OWNER}/${REPO_NAME}"
-            exit 1
-          }
-          Write-Host "Found latest Opus release tag: $LATEST_RELEASE_TAG"
-
-          $OPUS_BUILD_VERSION = ($LATEST_RELEASE_TAG -replace "build-", "") # Assumes tag is 'build-YYYYMMDD-HHMMSS'
-          $EXPECTED_ARTIFACT_NAME = "${ARTIFACT_PREFIX}-${OPUS_BUILD_VERSION}${ARTIFACT_EXT}"
-          Write-Host "Expected artifact name: $EXPECTED_ARTIFACT_NAME"
-
-          $DOWNLOAD_URL = $LATEST_RELEASE_DATA.assets | Where-Object { $_.name -eq $EXPECTED_ARTIFACT_NAME } | Select-Object -ExpandProperty browser_download_url
-          if (-not $DOWNLOAD_URL) {
-            Write-Host "##[error]Error: Could not find download URL for artifact $EXPECTED_ARTIFACT_NAME in release $LATEST_RELEASE_TAG"
-            exit 1
-          }
-          Write-Host "Downloading Opus artifact from: $DOWNLOAD_URL"
-
-          New-Item -ItemType Directory -Path "external_libs/opus_temp" -Force
-          $zipPath = Join-Path -Path "external_libs/opus_temp" -ChildPath $EXPECTED_ARTIFACT_NAME
-
-          Invoke-WebRequest -Uri $DOWNLOAD_URL -OutFile $zipPath
-
-          Write-Host "Extracting $zipPath to external_libs/opus_temp/"
-          Expand-Archive -Path $zipPath -DestinationPath "external_libs/opus_temp/" -Force
-
-          # Copy opus.lib to PJSIP's lib directory
-          $pjsipLibDir = "lib"
-          New-Item -ItemType Directory -Path $pjsipLibDir -Force
-
-          $foundOpusLib = Get-ChildItem -Path "external_libs/opus_temp" -Filter "opus.lib" -Recurse | Select-Object -First 1
-
-          if ($foundOpusLib) {
-              Copy-Item -Path $foundOpusLib.FullName -Destination $pjsipLibDir
-              Write-Host "Copied opus.lib from $($foundOpusLib.FullName) to $pjsipLibDir"
-          } else {
-              Write-Host "##[error]Error: opus.lib not found within the extracted contents of the Opus release. Please check the structure."
-              exit 1
-          }
-
-          # Copy Opus headers to PJSIP's pjlib/include/pj/opus directory
-          $pjIncludeOpusDir = "pjlib/include/pj/opus"
-          New-Item -ItemType Directory -Path $pjIncludeOpusDir -Force
-
-          $foundOpusHeadersPath = Get-ChildItem -Path "external_libs/opus_temp" -Filter "opus.h" -Recurse | Select-Object -ExpandProperty DirectoryName | Select-Object -First 1
-
-          if ($foundOpusHeadersPath) {
-              Copy-Item -Path (Join-Path -Path $foundOpusHeadersPath -ChildPath "*.h") -Destination $pjIncludeOpusDir
-              Write-Host "Copied Opus headers from $($foundOpusHeadersPath) to $pjIncludeOpusDir"
-          } else {
-              Write-Host "##[warning]Warning: Opus 'opus.h' header file not found within extracted contents. Headers might be missing."
-          }
+          pwsh.exe -File scripts/download_opus_windows.ps1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: powershell
 
-      # Step 3: Create PJSIP config_site.h
+      # Step 4: Create PJSIP config_site.h
       - name: Create PJSIP config_site.h
         shell: pwsh
         run: |
@@ -171,16 +195,16 @@ jobs:
 #define PJ_DONT_NEED_WIN32_VER_HACKS 1
 // Explicitly define platform/architecture for broader compatibility
 #define _WIN32
-#define _M_X64 
+#define _M_X64
 #include <pj/config_site_sample.h>
 "@
           Set-Content -Path "pjlib/include/pj/config_site.h" -Value $configSiteContent
 
-      # Step 4: Add MSBuild to path
+      # Step 5: Add MSBuild to path
       - name: Add MSBuild to path
         uses: microsoft/setup-msbuild@v2
 
-      # Step 5: Create build_pjsip.ps1
+      # Step 6: Create build_pjsip.ps1
       - name: Create build_pjsip.ps1
         shell: pwsh
         run: |
@@ -227,7 +251,7 @@ try {
           New-Item -Path "scripts" -ItemType Directory -Force # Ensure scripts directory exists
           Set-Content -Path "scripts/build_pjsip.ps1" -Value $buildScriptContent
 
-      # Step 6: Create patch.ps1
+      # Step 7: Create patch.ps1
       - name: Create patch.ps1
         shell: pwsh
         run: |
@@ -291,7 +315,7 @@ try {
           New-Item -Path "scripts" -ItemType Directory -Force # Ensure scripts directory exists
           Set-Content -Path "scripts/patch.ps1" -Value $patchScriptContent
 
-      # Step 7: Patch PJSIP pjmedia_codec.vcxproj for x64 defines
+      # Step 8: Patch PJSIP pjmedia_codec.vcxproj for x64 defines
       - name: Patch PJSIP pjmedia_codec.vcxproj for x64 defines
         shell: pwsh
         run: |
@@ -301,7 +325,7 @@ try {
           Write-Host "Executing patch script: $patch_script_path on $pjmedia_codec_vcxproj_path"
           pwsh.exe -File $patch_script_path -ProjFile $pjmedia_codec_vcxproj_path
 
-      # Step 8: Build PJSIP Solution
+      # Step 9: Build PJSIP Solution
       - name: Build PJSIP Solution
         shell: pwsh
         run: |
@@ -311,13 +335,13 @@ try {
           # Based on documentation and common structure, `build/vs/pjproject.sln` is a safe bet for VS projects.
           # If the main PJSIP .sln is at the root, use: $sln_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "pjproject.sln"
           $sln_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "build/vs/pjproject.sln"
-          
+
           $script_path = Join-Path -Path $env:GITHUB_WORKSPACE -ChildPath "scripts/build_pjsip.ps1"
-          
+
           Write-Host "Executing script: $script_path with solution file: $sln_path"
           pwsh.exe -File $script_path -SlnFile $sln_path
 
-      # Step 9: Upload PJSIP Libraries as Artifact
+      # Step 10: Upload PJSIP Libraries as Artifact
       - name: Upload PJSIP Libraries as Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -551,6 +575,7 @@ try {
               ARTIFACT_PREFIX='opus-linux-arm64'
               ARTIFACT_EXT='.tar.gz'
 
+              # Fetch latest release data
               LATEST_RELEASE_DATA=\$(curl -s 'https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest')
               LATEST_RELEASE_TAG=\$(echo \"\${LATEST_RELEASE_DATA}\" | jq -r .tag_name)
               if [ \"\${LATEST_RELEASE_TAG}\" == \"null\" ] || [ -z \"\${LATEST_RELEASE_TAG}\" ]; then
@@ -655,11 +680,11 @@ try {
           # Downloads all artifacts from the current workflow run
           path: ./artifacts
 
-      # Step 2: List downloaded artifacts (for debugging)
+      # Step 2: List Downloaded Artifacts (for debugging)
       - name: List Downloaded Artifacts
         run: ls -R ./artifacts
 
-      # Step 3: Create GitHub Release and upload assets
+      # Step 3: Create Release
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
