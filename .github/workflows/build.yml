@@ -10,7 +10,7 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.12
+# Action Version: 1.0.13
 # Last Updated: 2025-06-16
 # Description of Changes:
 #   - **Extracted PowerShell scripts into separate .ps1 files within the 'scripts' directory.**
@@ -24,7 +24,7 @@
 #   - Added 'jq' installation for parsing GitHub API JSON for release downloads.
 #   - Included `chown` command in Docker build step to resolve permission issues for artifacts.
 #   - Maintained all previous build and release functionalities.
-#   - Fixed YAML syntax error on line 99 by reordering 'env' and 'id' blocks and removing inline comments.
+#   - Fixed YAML syntax error on line 99 by correcting the indentation of the 'shell' property.
 #
 # For more information on GitHub Actions: https://docs.github.com/en/actions
 # For PJSIP build instructions:
@@ -162,11 +162,11 @@ if ($foundOpusHeadersPath) {
 
       # Step 3: Find and download the latest Opus release for Windows (Execute script)
       - name: Find and download latest Opus Windows release
-        env: # Moved env block to be before id
+        env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         id: download_opus_release_windows
         run: pwsh.exe -File scripts/download_opus_windows.ps1
-        shell: pwsh
+        shell: pwsh # Corrected indentation to be under the step
 
       # Step 4: Create PJSIP config_site.h
       - name: Create PJSIP config_site.h
