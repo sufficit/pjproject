@@ -3,11 +3,14 @@
 #
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
-# Date: June 15, 2025
-# Version: 1
+# Date: June 16, 2025
+# Version: 2
 #
 # This script downloads the latest pre-compiled Opus library for Windows from a GitHub Release,
 # extracts it, and copies the necessary .lib and .h files to the PJSIP build environment.
+#
+# Changes:
+#   - Improved robustness for finding and copying Opus header files, searching recursively.
 # =================================================================================================
 
 $REPO_OWNER="sufficit"
@@ -62,11 +65,14 @@ if ($foundOpusLib) {
 $pjIncludeOpusDir = "pjlib/include/pj/opus"
 New-Item -ItemType Directory -Path $pjIncludeOpusDir -Force
 
-$foundOpusHeadersPath = Get-ChildItem -Path "external_libs/opus_temp" -Filter "opus.h" -Recurse | Select-Object -ExpandProperty DirectoryName | Select-Object -First 1
+# Find all .h files recursively and copy them individually
+$foundOpusHeaders = Get-ChildItem -Path "external_libs/opus_temp" -Filter "*.h" -Recurse
 
-if ($foundOpusHeadersPath) {
-    Copy-Item -Path (Join-Path -Path $foundOpusHeadersPath -ChildPath "*.h") -Destination $pjIncludeOpusDir
-    Write-Host "Copied Opus headers from $($foundOpusHeadersPath) to $pjIncludeOpusDir"
+if ($foundOpusHeaders.Count -gt 0) {
+    foreach ($headerFile in $foundOpusHeaders) {
+        Copy-Item -Path $headerFile.FullName -Destination $pjIncludeOpusDir
+        Write-Host "Copied header: $($headerFile.FullName) to $pjIncludeOpusDir"
+    }
 } else {
-    Write-Host "##[warning]Warning: Opus 'opus.h' header file not found within extracted contents. Headers might be missing."
+    Write-Host "##[warning]Warning: No Opus header files (*.h) found within extracted contents. Headers might be missing."
 }
