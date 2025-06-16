@@ -10,10 +10,10 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.5
+# Action Version: 1.0.6
 # Last Updated: 2025-06-16
 # Description of Changes:
-#   - **Corrected YAML syntax error on line 165 and throughout `run` blocks by ensuring consistent indentation.**
+#   - **Corrected YAML syntax error on line 165 (and throughout `run` blocks) by ensuring consistent indentation.**
 #   - **Ensured all comments in the code are in English.**
 #   - Updated the repository path to 'sufficit/pjproject' in the initial checkout.
 #   - Implemented downloading of pre-compiled Opus artifacts from the 'sufficit/opus' repository
@@ -205,7 +205,7 @@ param (
 
 $solutionPath = $SlnFile
 $configuration = "Release"
-$platform = "x64" # Targetting x64
+$platform = "x64" # Targeting x64
 
 $msbuildPath = "msbuild.exe"
 
