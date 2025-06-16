@@ -4,11 +4,16 @@
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
 # Date: June 16, 2025
-# Version: 3
+# Version: 4
 #
 # This script builds the PJSIP solution using MSBuild, ensuring the correct configuration
 # and platform are applied. It now attempts to find the solution file more robustly
-# by including specific solution file names found in the 'sufficit/pjproject' repository.
+# and explicitly uses the 'Build' target to avoid 'Rebuild' target errors for some project types.
+#
+# Changes:
+#   - Changed the MSBuild command to use '/t:Build' instead of '/t:Rebuild' for the solution.
+#     This helps prevent MSB4057 errors for project types (like .csproj) that might not
+#     explicitly define a 'Rebuild' target.
 # =================================================================================================
 
 param (
@@ -60,7 +65,11 @@ Write-Host "Configuration: $configuration"
 Write-Host "Platform: $platform"
 
 try {
-    & $msbuildPath $solutionPath /p:Configuration=$configuration /p:Platform=$platform /m /t:Rebuild
+    # Using /t:Build instead of /t:Rebuild to avoid MSB4057 errors for projects
+    # that might not define a 'Rebuild' target (common with .csproj for UWP/WP8).
+    # Building the solution this way will still cause MSBuild to build all projects
+    # configured within the solution.
+    & $msbuildPath $solutionPath /p:Configuration=$configuration /p:Platform=$platform /m /t:Build
     if ($LASTEXITCODE -ne 0) {
         Write-Host "##[error]MSBuild failed with exit code $LASTEXITCODE."
         exit 1
