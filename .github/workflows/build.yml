@@ -10,22 +10,12 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.22
+# Action Version: 1.0.23
 # Last Updated: 2025-06-16
 # Description of Changes:
-#   - **Modified the workflow to run only the 'build-windows' job for now.**
-#   - **Disabled 'build-linux' and 'build-linux-arm' jobs by commenting them out.**
-#   - **Updated the 'create-release' job to depend only on 'build-windows'.**
-#   - **Removed 'continue-on-error: true' from debug steps as it's no longer needed.**
-#   - Improved robustness for finding and copying Opus header files (.h) in Linux and ARM builds,
-#     using recursive find and individual copy operations.
-#   - Added debug steps to list contents of 'external_libs/opus_temp' after extraction
-#     in both Windows and Linux builds to diagnose missing Opus files.
-#   - Modified 'find' commands for Opus libraries/headers to be more robust, searching recursively.
-#   - Extracted 'config_site.h' creation logic into a separate PowerShell script 'scripts/create_config_site.ps1'.
-#   - The workflow now calls 'scripts/create_config_site.ps1' for 'config_site.h' generation,
-#     resolving persistent YAML syntax errors related to multi-line string handling.
-#   - Ensured all comments in the code are in English.
+#   - **Changed 'config_site.h' and 'pjsip_extra_defines.h' generation to direct file copying**
+#     **from pre-existing files in 'scripts/' to resolve persistent C preprocessor errors.**
+#   - **Ensured all comments in the code are in English.**
 #   - Updated the repository path to 'sufficit/pjproject' in the initial checkout.
 #   - Implemented downloading of pre-compiled Opus artifacts from the 'sufficit/opus' repository
 #     (via GitHub Releases) in each PJSIP build job, with enhanced logic for naming and extraction.
@@ -102,15 +92,15 @@ jobs:
           Get-ChildItem -Path external_libs/opus_temp -Recurse | Select-Object FullName, Name, Mode, Length
         shell: pwsh
 
-      # Step 3: Create pjsip_extra_defines.h using a script
-      - name: Create PJSIP extra defines header
+      # Step 3: Copy pjsip_extra_defines.h from scripts folder
+      - name: Copy PJSIP extra defines header
         shell: pwsh
-        run: scripts/create_extra_config.ps1 # Execute the script to create the extra defines file
+        run: Copy-Item -Path "scripts/pjsip_extra_defines_content.h" -Destination "pjlib/include/pj/pjsip_extra_defines.h" -Force
 
-      # Step 4: Create PJSIP config_site.h
-      - name: Create PJSIP config_site.h
+      # Step 4: Copy config_site.h from scripts folder
+      - name: Copy PJSIP config_site.h
         shell: pwsh
-        run: scripts/create_config_site.ps1 # Call the dedicated script
+        run: Copy-Item -Path "scripts/config_site_content.h" -Destination "pjlib/include/pj/config_site.h" -Force
 
       # Step 5: Add MSBuild to path
       - name: Add MSBuild to path
