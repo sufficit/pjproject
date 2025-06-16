@@ -10,16 +10,22 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.20
+# Action Version: 1.0.22
 # Last Updated: 2025-06-16
 # Description of Changes:
-#   - **Added debug steps to list contents of 'external_libs/opus_temp' after extraction**
-#     **in both Windows and Linux builds to diagnose missing Opus files.**
-#   - **Modified 'find' commands for Opus libraries/headers to be more robust, searching recursively.**
-#   - **Extracted 'config_site.h' creation logic into a separate PowerShell script 'scripts/create_config_site.ps1'.**
-#   - **The workflow now calls 'scripts/create_config_site.ps1' for 'config_site.h' generation,**
-#     **resolving persistent YAML syntax errors related to multi-line string handling.**
-#   - **Ensured all comments in the code are in English.**
+#   - **Modified the workflow to run only the 'build-windows' job for now.**
+#   - **Disabled 'build-linux' and 'build-linux-arm' jobs by commenting them out.**
+#   - **Updated the 'create-release' job to depend only on 'build-windows'.**
+#   - **Removed 'continue-on-error: true' from debug steps as it's no longer needed.**
+#   - Improved robustness for finding and copying Opus header files (.h) in Linux and ARM builds,
+#     using recursive find and individual copy operations.
+#   - Added debug steps to list contents of 'external_libs/opus_temp' after extraction
+#     in both Windows and Linux builds to diagnose missing Opus files.
+#   - Modified 'find' commands for Opus libraries/headers to be more robust, searching recursively.
+#   - Extracted 'config_site.h' creation logic into a separate PowerShell script 'scripts/create_config_site.ps1'.
+#   - The workflow now calls 'scripts/create_config_site.ps1' for 'config_site.h' generation,
+#     resolving persistent YAML syntax errors related to multi-line string handling.
+#   - Ensured all comments in the code are in English.
 #   - Updated the repository path to 'sufficit/pjproject' in the initial checkout.
 #   - Implemented downloading of pre-compiled Opus artifacts from the 'sufficit/opus' repository
 #     (via GitHub Releases) in each PJSIP build job, with enhanced logic for naming and extraction.
@@ -142,252 +148,355 @@ jobs:
           retention-days: 7 # Retain artifacts for 7 days
 
   # Job for Linux compilation (x64)
-  build-linux:
-    name: Build on Linux (x64)
-    # Uses the latest Ubuntu version (x64 by default)
-    runs-on: ubuntu-latest
+  # build-linux:
+  #   name: Build on Linux (x64)
+  #   # Uses the latest Ubuntu version (x64 by default)
+  #   runs-on: ubuntu-latest
 
-    outputs:
-      build_version: ${{ steps.date.outputs.BUILD_VERSION }} # Output the build version for other jobs
+  #   outputs:
+  #     build_version: ${{ steps.date.outputs.BUILD_VERSION }} # Output the build version for other jobs
 
-    steps:
-      # Step 0: Capture build date and time to use as version
-      - name: Get current date and time
-        id: date
-        run: |
-          # Formats the date and time asOGRAPHYYYYYMMDD-HHMMSS (UTC)
-          echo "BUILD_VERSION=$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_ENV"
-          echo "BUILD_VERSION=$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT" # Output for job dependencies
+  #   steps:
+  #     # Step 0: Capture build date and time to use as version
+  #     - name: Get current date and time
+  #       id: date
+  #       run: |
+  #         # Formats the date and time asOGRAPHYYYYYMMDD-HHMMSS (UTC)
+  #         echo "BUILD_VERSION=$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_ENV"
+  #         echo "BUILD_VERSION=$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT" # Output for job dependencies
 
-      # Step 1: Checkout the PJSIP repository
-      - name: Checkout PJSIP Repository
-        uses: actions/checkout@v4
-        with:
-          repository: sufficit/pjproject # Defining the correct repository
-          path: . # Checkout to the root of the workspace
-          submodules: recursive
+  #     # Step 1: Checkout the PJSIP repository
+  #     - name: Checkout PJSIP Repository
+  #       uses: actions/checkout@v4
+  #       with:
+  #         repository: sufficit/pjproject # Defining the correct repository
+  #         path: . # Checkout to the root of the workspace
+  #         submodules: recursive
 
-      # Step 2: Install build dependencies (including jq for Opus download)
-      - name: Install build dependencies and jq
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            libasound2-dev \
-            libusb-1.0-0-dev \
-            libssl-dev \
-            libspeex-dev \
-            libspeexdsp-dev \
-            libsamplerate0-dev \
-            libgsm1-dev \
-            libsrtp2-dev \
-            libwebrtc-audio-processing-dev \
-            jq \
-            wget \
-            tree # wget/curl for downloading Opus and tree for debugging
-          # NOTE: libopus-dev was removed, as we will use pre-compiled Opus.
-          # Add more dependencies here if your PJSIP configuration requires them (e.g., for video support: libsdl2-dev, libyuv-dev, ffmpeg, openh264)
+  #     # Step 2: Install build dependencies (including jq for Opus download)
+  #     - name: Install build dependencies and jq
+  #       run: |
+  #         sudo apt-get update
+  #         sudo apt-get install -y \
+  #           build-essential \
+  #           libasound2-dev \
+  #           libusb-1.0-0-dev \
+  #           libssl-dev \
+  #           libspeex-dev \
+  #           libspeexdsp-dev \
+  #           libsamplerate0-dev \
+  #           libgsm1-dev \
+  #           libsrtp2-dev \
+  #           libwebrtc-audio-processing-dev \
+  #           jq \
+  #           wget \
+  #           tree # wget/curl for downloading Opus and tree for debugging
+  #         # NOTE: libopus-dev was removed, as we will use pre-compiled Opus.
+  #         # Add more dependencies here if your PJSIP configuration requires them (e.g., for video support: libsdl2-dev, libyuv-dev, ffmpeg, openh264)
 
-      # Step 3: Find and download the latest Opus release (Linux x64)
-      - name: Find and download latest Opus Linux x64 release
-        id: download_opus_release_linux
-        run: |
-          REPO_OWNER="sufficit"
-          REPO_NAME="opus"
-          ARTIFACT_PREFIX="opus-linux-x64"
-          ARTIFACT_EXT=".tar.gz"
+  #     # Step 3: Find and download the latest Opus release (Linux x64)
+  #     - name: Find and download latest Opus Linux x64 release
+  #       id: download_opus_release_linux
+  #       run: |
+  #         REPO_OWNER="sufficit"
+  #         REPO_NAME="opus"
+  #         ARTIFACT_PREFIX="opus-linux-x64"
+  #         ARTIFACT_EXT=".tar.gz"
 
-          echo "Fetching latest release data from https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest"
-          LATEST_RELEASE_DATA=$(curl -s "https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest")
-          LATEST_RELEASE_TAG=$(echo "${LATEST_RELEASE_DATA}" | jq -r .tag_name)
-          if [ "${LATEST_RELEASE_TAG}" == "null" ] || [ -z "${LATEST_RELEASE_TAG}" ]; then
-            echo "::error::Could not find latest release tag for ${REPO_OWNER}/${REPO_NAME}"
-            exit 1
-          fi
-          echo "Found latest Opus release tag: ${LATEST_RELEASE_TAG}"
+  #         echo "Fetching latest release data from https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest"
+  #         LATEST_RELEASE_DATA=$(curl -s "https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest")
+  #         LATEST_RELEASE_TAG=$(echo "${LATEST_RELEASE_DATA}" | jq -r .tag_name)
+  #         if [ "${LATEST_RELEASE_TAG}" == "null" ] || [ -z "${LATEST_RELEASE_TAG}" ]; then
+  #           echo "::error::Could not find latest release tag for ${REPO_OWNER}/${REPO_NAME}"
+  #           exit 1
+  #         fi
+  #         echo "Found latest Opus release tag: ${LATEST_RELEASE_TAG}"
 
-          OPUS_BUILD_VERSION=$(echo "${LATEST_RELEASE_TAG}" | sed 's/^build-//') # Assume tag is 'build-YYYYMMDD-HHMMSS'
-          EXPECTED_ARTIFACT_NAME="${ARTIFACT_PREFIX}-${OPUS_BUILD_VERSION}${ARTIFACT_EXT}"
-          echo "Expected artifact name: ${EXPECTED_ARTIFACT_NAME}"
+  #         OPUS_BUILD_VERSION=$(echo "${LATEST_RELEASE_TAG}" | sed 's/^build-//') # Assume tag is 'build-YYYYMMDD-HHMMSS'
+  #         EXPECTED_ARTIFACT_NAME="${ARTIFACT_PREFIX}-${OPUS_BUILD_VERSION}${ARTIFACT_EXT}"
+  #         echo "Expected artifact name: ${EXPECTED_ARTIFACT_NAME}"
 
-          DOWNLOAD_URL=$(echo "${LATEST_RELEASE_DATA}" | jq -r ".assets[] | select(.name==\"${EXPECTED_ARTIFACT_NAME}\") | .browser_download_url")
-          if [ "${DOWNLOAD_URL}" == "null" ] || [ -z "${DOWNLOAD_URL}" ]; then
-            echo "::error::Could not find download URL for artifact ${EXPECTED_ARTIFACT_NAME} in release ${LATEST_RELEASE_TAG}"
-            exit 1
-          fi
-          echo "Downloading Opus artifact from: ${DOWNLOAD_URL}"
+  #         DOWNLOAD_URL=$(echo "${LATEST_RELEASE_DATA}" | jq -r ".assets[] | select(.name==\"${EXPECTED_ARTIFACT_NAME}\") | .browser_download_url")
+  #         if [ "${DOWNLOAD_URL}" == "null" ] || [ -z "${DOWNLOAD_URL}" ]; then
+  #           echo "::error::Could not find download URL for artifact ${EXPECTED_ARTIFACT_NAME} in release ${LATEST_RELEASE_TAG}"
+  #           exit 1
+  #         fi
+  #         echo "Downloading Opus artifact from: ${DOWNLOAD_URL}"
 
-          mkdir -p external_libs/opus_temp
-          wget -q -O "external_libs/opus_temp/${EXPECTED_ARTIFACT_NAME}" "${DOWNLOAD_URL}"
-          tar -xzf "external_libs/opus_temp/${EXPECTED_ARTIFACT_NAME}" -C external_libs/opus_temp/ # Extract into temp folder
+  #         mkdir -p external_libs/opus_temp
+  #         wget -q -O "external_libs/opus_temp/${EXPECTED_ARTIFACT_NAME}" "${DOWNLOAD_URL}"
+  #         tar -xzf "external_libs/opus_temp/${EXPECTED_ARTIFACT_NAME}" -C external_libs/opus_temp/ # Extract into temp folder
 
-          # Copy Opus libraries and headers to PJSIP's directories
-          # Assuming `libopus.a` is found in `external_libs/opus_temp/{subfolder}/libopus.a`
-          # and headers in `external_libs/opus_temp/{subfolder}/include/opus/*.h`
-          PJSIP_LIB_DIR="lib"
-          PJSIP_INCLUDE_OPUS_DIR="pjlib/include/pj/opus"
-          mkdir -p "${PJSIP_LIB_DIR}"
-          mkdir -p "${PJSIP_INCLUDE_OPUS_DIR}"
+  #         # Copy Opus libraries and headers to PJSIP's directories
+  #         PJSIP_LIB_DIR="lib"
+  #         PJSIP_INCLUDE_OPUS_DIR="pjlib/include/pj/opus"
+  #         mkdir -p "${PJSIP_LIB_DIR}"
+  #         mkdir -p "${PJSIP_INCLUDE_OPUS_DIR}"
 
-          # Find and copy libopus.a
-          find external_libs/opus_temp -name "libopus.a" -exec cp {} "${PJSIP_LIB_DIR}/" \;
-          if [ $? -ne 0 ]; then echo "::error::libopus.a not found in extracted Opus artifacts."; exit 1; fi
-          echo "Copied libopus.a to ${PJSIP_LIB_DIR}/"
+  #         # Find and copy libopus.a (more robust)
+  #         find external_libs/opus_temp -name "libopus.a" -exec cp {} "${PJSIP_LIB_DIR}/" \;
+  #         if [ $? -ne 0 ]; then echo "::error::libopus.a not found in extracted Opus artifacts."; exit 1; fi
+  #         echo "Copied libopus.a to ${PJSIP_LIB_DIR}/"
 
-          # Find and copy Opus headers
-          OPUS_HEADERS_SOURCE_DIR=$(find external_libs/opus_temp -name "opus.h" -print -quit | xargs dirname)
-          if [ -n "${OPUS_HEADERS_SOURCE_DIR}" ]; then
-            cp "${OPUS_HEADERS_SOURCE_DIR}"/*.h "${PJSIP_INCLUDE_OPUS_DIR}/"
-            echo "Copied Opus headers from ${OPUS_HEADERS_SOURCE_DIR} to ${PJSIP_INCLUDE_OPUS_DIR}/"
-          else
-            echo "::warning::Opus 'opus.h' header file not found within extracted contents. Headers might be missing."
-          fi
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
+  #         # Find and copy Opus headers (*.h) recursively (more robust)
+  #         find external_libs/opus_temp -name "*.h" -exec cp {} "${PJSIP_INCLUDE_OPUS_DIR}/" \;
+  #         if [ $? -ne 0 ]; then echo "::warning::No Opus header files (*.h) found within extracted contents. Headers might be missing."; fi
 
-      # Debugging Step: List contents of opus_temp after extraction
-      - name: Debug - List Opus extracted contents (Linux)
-        run: |
-          ls -R external_libs/opus_temp
-          tree external_libs/opus_temp || true # tree might not be installed, so allow failure
-        shell: bash
+  #       env:
+  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #       shell: bash
 
-      # Step 4: Create config_site.h (optional, but good practice for customizing PJSIP)
-      - name: Create config_site.h
-        run: |
-          echo '#include <pj/config_site_sample.h>' | sudo tee pjlib/include/pj/config_site.h > /dev/null
+  #     # Debugging Step: List contents of opus_temp after extraction
+  #     - name: Debug - List Opus extracted contents (Linux)
+  #       run: |
+  #         ls -R external_libs/opus_temp
+  #         tree external_libs/opus_temp || true # tree might not be installed, so allow failure
+  #       shell: bash
 
-      # Step 5: Configure PJSIP
-      - name: Configure PJSIP for Linux
-        run: |
-          # Define CFLAGS and LDFLAGS to point to the external Opus installation
-          # Assuming `libopus.a` is directly under `${PJSIP_LIB_DIR}` after extraction
-          export CFLAGS="-I$(pwd)/pjlib/include/pj -I$(pwd)/pjlib/include/pj/opus" # Include pj/opus and pj
-          export LDFLAGS="-L$(pwd)/lib -lopus" # Link with libopus.a
-          ./configure --enable-shared --disable-sound-portaudio # Disable portaudio if not strictly needed
-          # Add more configure options as needed, e.g., --disable-video --disable-legacy-api
+  #     # Step 4: Create config_site.h (optional, but good practice for customizing PJSIP)
+  #     - name: Create config_site.h
+  #       run: |
+  #         echo '#include <pj/config_site_sample.h>' | sudo tee pjlib/include/pj/config_site.h > /dev/null
 
-      # Step 6: Compile PJSIP
-      - name: Build PJSIP for Linux
-        run: |
-          make dep && make
+  #     # Step 5: Configure PJSIP
+  #     - name: Configure PJSIP for Linux
+  #       run: |
+  #         # Define CFLAGS and LDFLAGS to point to the external Opus installation
+  #         # Assuming `libopus.a` is directly under `${PJSIP_LIB_DIR}` after extraction
+  #         export CFLAGS="-I$(pwd)/pjlib/include/pj -I$(pwd)/pjlib/include/pj/opus" # Include pj/opus and pj
+  #         export LDFLAGS="-L$(pwd)/lib -lopus" # Link with libopus.a
+  #         ./configure --enable-shared --disable-sound-portaudio # Disable portaudio if not strictly needed
+  #         # Add more configure options as needed, e.g., --disable-video --disable-legacy-api
 
-      # Step 7: Archive Linux build artifacts
-      - name: Archive Linux builds
-        run: |
-          mkdir pjsip_artifacts
-          find . -maxdepth 2 -type f -name "*.so*" -exec cp {} pjsip_artifacts/ \; # Copy all shared libraries
-          cp pjsip-apps/bin/pjsua pjsip_artifacts/ # Copy main PJSIP application
-          # Add other binaries if necessary, e.g., from pjsip-apps/bin/samples/
+  #     # Step 6: Compile PJSIP
+  #     - name: Build PJSIP for Linux
+  #       run: |
+  #         make dep && make
 
-          tar -czvf pjsip-linux-x64-${{ env.BUILD_VERSION }}.tar.gz -C pjsip_artifacts .
+  #     # Step 7: Archive Linux build artifacts
+  #     - name: Archive Linux builds
+  #       run: |
+  #         mkdir pjsip_artifacts
+  #         find . -maxdepth 2 -type f -name "*.so*" -exec cp {} pjsip_artifacts/ \; # Copy all shared libraries
+  #         cp pjsip-apps/bin/pjsua pjsip_artifacts/ # Copy main PJSIP application
+  #         # Add other binaries if necessary, e.g., from pjsip-apps/bin/samples/
 
-      # Step 8: Upload artifacts
-      - name: Upload Linux artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: pjsip-linux-x64-${{ env.BUILD_VERSION }} # Adjusted to use BUILD_VERSION
-          path: pjsip-linux-x64-${{ env.BUILD_VERSION }}.tar.gz
+  #         tar -czvf pjsip-linux-x64-${{ env.BUILD_VERSION }}.tar.gz -C pjsip_artifacts .
+
+  #     # Step 8: Upload artifacts
+  #     - name: Upload Linux artifacts
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: pjsip-linux-x64-${{ env.BUILD_VERSION }} # Adjusted to use BUILD_VERSION
+  #         path: pjsip-linux-x64-${{ env.BUILD_VERSION }}.tar.gz
 
   # Job for Linux ARM compilation (64-bit)
-  build-linux-arm:
-    name: Build on Linux ARM (64-bit)
-    # Uses the latest Ubuntu version (x64), and then sets up ARM64 emulation
+  # build-linux-arm:
+  #   name: Build on Linux ARM (64-bit)
+  #   # Uses the latest Ubuntu version (x64), and then sets up ARM64 emulation
+  #   runs-on: ubuntu-latest
+
+  #   outputs:
+  #     build_version: ${{ steps.date.outputs.BUILD_VERSION }} # Output the build version for other jobs
+
+  #   steps:
+  #     # Step 0: Capture build date and time to use as version
+  #     - name: Get current date and time
+  #       id: date
+  #       run: |
+  #         # Formats the date and time asOGRAPHYYYYYMMDD-HHMMSS (UTC)
+  #         echo "BUILD_VERSION=$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_ENV"
+  #         echo "BUILD_VERSION=$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT" # Output for job dependencies
+
+  #     # Step 1: Set up QEMU for ARM64 emulation
+  #     - name: Set up QEMU
+  #       uses: docker/setup-qemu-action@v3
+  #       with:
+  #         platforms: all
+
+  #     # Step 2: Set up Docker Buildx for multi-platform builds
+  #     - name: Set up Docker Buildx
+  #       uses: docker/setup-buildx-action@v3
+
+  #     # Step 3: Checkout the PJSIP repository
+  #     - name: Checkout PJSIP Repository
+  #       uses: actions/checkout@v4
+  #       with:
+  #         repository: sufficit/pjproject # Defining the correct repository
+  #         path: . # Checkout to the root of the workspace
+  #         submodules: recursive
+
+  #     # Step 4: Build PJSIP for ARM inside a Docker container
+  #     - name: Build PJSIP for Linux ARM using Docker
+  #       run: |
+  #         # Define the target architecture and a suitable Docker image
+  #         # We use a base Ubuntu image and install cross-compilation tools and ARM-specific dev libs inside it.
+  #         TARGET_ARCH="arm64"
+  #         DOCKER_IMAGE="ubuntu:noble" # Ubuntu 24.04
+
+  #         # Create a temporary directory on the host to copy artifacts from the Docker container
+  #         mkdir pjsip_arm_artifacts_host
+
+  #         # Run the build commands inside the Docker container
+  #         docker run --rm \
+  #           --platform linux/${TARGET_ARCH} \
+  #           -v ${{ github.workspace }}:/src \
+  #           -w /src \
+  #           ${DOCKER_IMAGE} \
+  #           /bin/bash -c "
+  #             set -e # Exit immediately if a command exits with a non-zero status.
+
+  #             echo 'Installing cross-compilation tools and build dependencies inside Docker for ARM...'
+  #             apt-get update && apt-get install -y --no-install-recommends \
+  #               build-essential \
+  #               crossbuild-essential-arm64 \
+  #               libasound2-dev \
+  #               libusb-1.0-0-dev \
+  #               libssl-dev \
+  #               libspeex-dev \
+  #               libspeexdsp-dev \
+  #               libsamplerate0-dev \
+  #               libgsm1-dev \
+  #               libsrtp2-dev \
+  #               libwebrtc-audio-processing-dev \
+  #               jq \
+  #               wget \
+  #               tree # wget/curl for downloading Opus and tree for debugging
+
+  #             echo 'Finding and downloading latest Opus ARM release...'
+  #             REPO_OWNER='sufficit'
+  #             REPO_NAME='opus'
+  #             ARTIFACT_PREFIX='opus-linux-arm64'
+  #             ARTIFACT_EXT='.tar.gz'
+
+  #             # Fetch latest release data
+  #             LATEST_RELEASE_DATA=\$(curl -s 'https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest')
+  #             LATEST_RELEASE_TAG=\$(echo \"\${LATEST_RELEASE_DATA}\" | jq -r .tag_name)
+  #             if [ \"\${LATEST_RELEASE_TAG}\" == \"null\" ] || [ -z \"\${LATEST_RELEASE_TAG}\" ]; then
+  #               echo \"Error: Could not find latest release tag for ${REPO_OWNER}/${REPO_NAME}\"
+  #               exit 1
+  #             fi
+  #             echo \"Found latest Opus release tag: \${LATEST_RELEASE_TAG}\"
+
+  #             OPUS_BUILD_VERSION=\$(echo \"\${LATEST_RELEASE_TAG}\" | sed 's/^build-//')
+  #             EXPECTED_ARTIFACT_NAME=\"\${ARTIFACT_PREFIX}-\${OPUS_BUILD_VERSION}\${ARTIFACT_EXT}\"
+  #             echo \"Expected artifact name: \${EXPECTED_ARTIFACT_NAME}\"
+
+  #             DOWNLOAD_URL=\$(echo \"\${LATEST_RELEASE_DATA}\" | jq -r \".assets[] | select(.name==\\\"\${EXPECTED_ARTIFACT_NAME}\\\") | .browser_download_url\")
+  #             if [ \"\${DOWNLOAD_URL}\" == \"null\" ] || [ -z \"\${DOWNLOAD_URL}\" ]; then
+  #               echo \"Error: Could not find download URL for artifact \${EXPECTED_ARTIFACT_NAME} in release \${LATEST_RELEASE_TAG}\"
+  #               exit 1
+  #             fi
+  #             echo \"Downloading Opus artifact from: \${DOWNLOAD_URL}\"
+
+  #             mkdir -p /src/external_libs/opus_temp
+  #             wget -q -O \"/src/external_libs/opus_temp/\${EXPECTED_ARTIFACT_NAME}\" \"\${DOWNLOAD_URL}\"
+  #             tar -xzf \"/src/external_libs/opus_temp/\${EXPECTED_ARTIFACT_NAME}\" -C /src/external_libs/opus_temp/
+  #             echo 'Opus artifact extracted to /src/external_libs/opus_temp/'
+
+  #             # Debugging Step: List contents of opus_temp after extraction
+  #             echo 'Debug - Listing Opus extracted contents (ARM Linux)...'
+  #             ls -R /src/external_libs/opus_temp
+  #             tree /src/external_libs/opus_temp || true # tree might not be installed, so allow failure
+
+  #             # Copy Opus libraries and headers to PJSIP's directories
+  #             PJSIP_LIB_DIR="/src/lib" # Inside container, absolute path
+  #             PJSIP_INCLUDE_OPUS_DIR="/src/pjlib/include/pj/opus" # Inside container, absolute path
+  #             mkdir -p "${PJSIP_LIB_DIR}"
+  #             mkdir -p "${PJSIP_INCLUDE_OPUS_DIR}"
+
+  #             # Find and copy libopus.a (more robust)
+  #             find /src/external_libs/opus_temp -name "libopus.a" -exec cp {} "${PJSIP_LIB_DIR}/" \;
+  #             if [ \$? -ne 0 ]; then echo "Error: libopus.a not found in extracted Opus artifacts."; exit 1; fi
+  #             echo "Copied libopus.a to ${PJSIP_LIB_DIR}/"
+
+  #             # Find and copy Opus headers (*.h) recursively (more robust)
+  #             find /src/external_libs/opus_temp -name "*.h" -exec cp {} "${PJSIP_INCLUDE_OPUS_DIR}/" \;
+  #             if [ \$? -ne 0 ]; then echo "Warning: No Opus header files (*.h) found within extracted contents. Headers might be missing."; fi
+
+  #             echo 'Creating config_site.h...'
+  #             echo '#include <pj/config_site_sample.h>' | tee pjlib/include/pj/config_site.h > /dev/null
+
+  #             echo 'Configuring PJSIP for Linux ARM...'
+  #             # Define CFLAGS and LDFLAGS to point to the external Opus installation
+  #             export CFLAGS="-I/src/pjlib/include/pj -I/src/pjlib/include/pj/opus"
+  #             export LDFLAGS="-L/src/lib -lopus"
+  #             ./configure --host=aarch64-linux-gnu --enable-shared --disable-sound-portaudio
+
+  #             echo 'Compiling PJSIP for Linux ARM...'
+  #             make dep && make
+
+  #             # Change ownership of the build artifacts to the host user before exiting the container
+  #             HOST_UID=\$(stat -c '%u' /src)
+  #             HOST_GID=\$(stat -c '%g' /src)
+  #             chown -R \${HOST_UID}:\${HOST_GID} /src/lib
+  #             chown -R \${HOST_UID}:\${HOST_GID} /src/pjsip-apps/bin
+  #           "
+  #         # Move compiled artifacts from the Docker's original directories to the host build directory
+  #         mv lib/* pjsip_arm_artifacts_host/
+  #         mv pjsip-apps/bin/* pjsip_arm_artifacts_host/
+  #       shell: bash
+
+  #     # Step 5: Archive Linux ARM builds
+  #     - name: Archive Linux ARM builds
+  #       run: |
+  #         # Compress the content of the 'pjsip_arm_artifacts_host' directory.
+  #         tar -czvf pjsip-linux-arm64-${{ env.BUILD_VERSION }}.tar.gz -C pjsip_arm_artifacts_host .
+
+  #     # Step 6: Upload artifacts
+  #     - name: Upload Linux ARM artifacts
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: pjsip-linux-arm64-${{ env.BUILD_VERSION }} # Adjusted to use BUILD_VERSION
+  #         path: pjsip-linux-arm64-${{ env.BUILD_VERSION }}.tar.gz
+
+  # Job to create GitHub Release
+  create-release:
+    name: Create GitHub Release
+    # This job runs only if all build jobs succeed
+    needs: [build-windows] # Depende apenas do build-windows agora
+    # Removed the 'if' condition, so this job now runs for every successful build on 'main'.
     runs-on: ubuntu-latest
 
-    outputs:
-      build_version: ${{ steps.date.outputs.BUILD_VERSION }} # Output the build version for other jobs
-
     steps:
-      # Step 0: Capture build date and time to use as version
-      - name: Get current date and time
-        id: date
+      # Step 0: Set the tag name based on the build version
+      # We need to get the BUILD_VERSION from one of the previous jobs.
+      # Since all jobs have the same BUILD_VERSION, we can pick one, e.g., build-windows.
+      - name: Set Release Tag Name
+        id: set_tag
         run: |
-          # Formats the date and time asOGRAPHYYYYYMMDD-HHMMSS (UTC)
-          echo "BUILD_VERSION=$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_ENV"
-          echo "BUILD_VERSION=$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT" # Output for job dependencies
+          echo "RELEASE_TAG=build-${{ needs.build-windows.outputs.build_version }}" >> "$GITHUB_ENV"
 
-      # Step 1: Set up QEMU for ARM64 emulation
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+      # Step 1: Download all build artifacts
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
         with:
-          platforms: all
+          # Downloads all artifacts from the current workflow run
+          path: ./artifacts
 
-      # Step 2: Set up Docker Buildx for multi-platform builds
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      # Step 2: List Downloaded Artifacts (for debugging)
+      - name: List Downloaded Artifacts
+        run: ls -R ./artifacts
 
-      # Step 3: Checkout the PJSIP repository
-      - name: Checkout PJSIP Repository
-        uses: actions/checkout@v4
+      # Step 3: Create Release
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
         with:
-          repository: sufficit/pjproject # Defining the correct repository
-          path: . # Checkout to the root of the workspace
-          submodules: recursive
-
-      # Step 4: Build PJSIP for ARM inside a Docker container
-      - name: Build PJSIP for Linux ARM using Docker
-        run: |
-          # Define the target architecture and a suitable Docker image
-          # We use a base Ubuntu image and install cross-compilation tools and ARM-specific dev libs inside it.
-          TARGET_ARCH="arm64"
-          DOCKER_IMAGE="ubuntu:noble" # Ubuntu 24.04
-
-          # Create a temporary directory on the host to copy artifacts from the Docker container
-          mkdir pjsip_arm_artifacts_host
-
-          # Run the build commands inside the Docker container
-          docker run --rm \
-            --platform linux/${TARGET_ARCH} \
-            -v ${{ github.workspace }}:/src \
-            -w /src \
-            ${DOCKER_IMAGE} \
-            /bin/bash -c "
-              set -e # Exit immediately if a command exits with a non-zero status.
-
-              echo 'Installing cross-compilation tools and build dependencies inside Docker for ARM...'
-              apt-get update && apt-get install -y --no-install-recommends \
-                build-essential \
-                crossbuild-essential-arm64 \
-                libasound2-dev \
-                libusb-1.0-0-dev \
-                libssl-dev \
-                libspeex-dev \
-                libspeexdsp-dev \
-                libsamplerate0-dev \
-                libgsm1-dev \
-                libsrtp2-dev \
-                libwebrtc-audio-processing-dev \
-                jq \
-                wget \
-                tree # wget/curl for downloading Opus and tree for debugging
-
-              echo 'Finding and downloading latest Opus ARM release...'
-              REPO_OWNER='sufficit'
-              REPO_NAME='opus'
-              ARTIFACT_PREFIX='opus-linux-arm64'
-              ARTIFACT_EXT='.tar.gz'
-
-              # Fetch latest release data
-              LATEST_RELEASE_DATA=\$(curl -s 'https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest')
-              LATEST_RELEASE_TAG=\$(echo \"\${LATEST_RELEASE_DATA}\" | jq -r .tag_name)
-              if [ \"\${LATEST_RELEASE_TAG}\" == \"null\" ] || [ -z \"\${LATEST_RELEASE_TAG}\" ]; then
-                echo \"Error: Could not find latest release tag for ${REPO_OWNER}/${REPO_NAME}\"
-                exit 1
-              fi
-              echo \"Found latest Opus release tag: \${LATEST_RELEASE_TAG}\"
-
-              OPUS_BUILD_VERSION=\$(echo \"\${LATEST_RELEASE_TAG}\" | sed 's/^build-//')
-              EXPECTED_ARTIFACT_NAME=\"\${ARTIFACT_PREFIX}-\${OPUS_BUILD_VERSION}\${ARTIFACT_EXT}\"
-              echo \"Expected artifact name: \${EXPECTED_ARTIFACT_NAME}\"
-
-              DOWNLOAD_URL=\$(echo \"\${LATEST_RELEASE_DATA}\" | jq -r \".assets[] | select(.name==\\\"\${EXPECTED_ARTIFACT_NAME}\\\") | .browser_download_url\")
-              if [ \"\${DOWNLOAD_URL}\" == \"null\" ] || [ -z \"\${DOWNLOAD_URL}\" ]; then
-                echo \"Error: Could not find download URL for artifact \${EXPECTED_ARTIFACT_NAME} in release \${LATEST_RELEASE_TAG}\"
-                exit 1
-              fi
-              echo \"Downloading Opus artifact from: \${DOWNLOAD_URL}\"
-
-              mkdir -p /src/external_libs/opus_temp
-              wget -q -O \"/
+          # Define the tag name for the release. This action will create the tag if it doesn't exist.
+          tag_name: ${{ env.RELEASE_TAG }}
+          # Define the release name
+          name: Automated Build Release ${{ env.RELEASE_TAG }}
+          # Provide a body for the release notes
+          body: |
+            Automated build for branch `main`.
+            Build Date (UTC): `${{ needs.build-windows.outputs.build_version }}`
+          # Set 'prerelease' to true if you want these auto-generated releases to be marked as pre-releases.
+          # Remove or set to 'false' if you want them as full releases.
+          # prerelease: true
+          files: |
+            ./artifacts/pjsip-windows-x64-${{ needs.build-windows.outputs.build_version }}/pjsip-windows-x64-${{ needs.build-windows.outputs.build_version }}.zip
+            # ./artifacts/pjsip-linux-x64-${{ needs.build-linux.outputs.build_version }}/pjsip-linux-x64-${{ needs.build-linux.outputs.build_version }}.tar.gz # Comentado
+            # ./artifacts/pjsip-linux-arm64-${{ needs.build-linux-arm.outputs.build_version }}/pjsip-linux-arm64-${{ needs.build-linux-arm.outputs.build_version }}.tar.gz # Comentado
+        env:
+          # GITHUB_TOKEN is automatically provided by GitHub Actions for authentication
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
