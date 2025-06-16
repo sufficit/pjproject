@@ -468,6 +468,18 @@ jobs:
       - name: List Downloaded Artifacts
         run: ls -R ./artifacts
 
+      - name: Prepare Windows Release Zip
+        if: needs.build-windows.result == 'success' # Only run if windows build succeeded
+        shell: bash # Use bash for zip command
+        run: |
+          ARTIFACT_DIR="./artifacts/pjsip-x64-libraries"
+          ZIP_FILE_NAME="pjsip-windows-x64-${{ needs.build-windows.outputs.build_version }}.zip"
+          echo "Artifact directory: $ARTIFACT_DIR"
+          echo "Zip file name: $ZIP_FILE_NAME"
+          cd "$ARTIFACT_DIR"
+          zip -r "../$ZIP_FILE_NAME" . # Zip contents of pjsip-x64-libraries into a zip file in the parent (artifacts) folder
+          echo "WINDOWS_RELEASE_ZIP=./artifacts/$ZIP_FILE_NAME" >> "$GITHUB_ENV"
+
       # Step 3: Create Release
       - name: Create Release
         uses: softprops/action-gh-release@v1
@@ -484,7 +496,7 @@ jobs:
           # Remove or set to 'false' if you want them as full releases.
           # prerelease: true
           files: |
-            ./artifacts/pjsip-windows-x64-${{ needs.build-windows.outputs.build_version }}/pjsip-windows-x64-${{ needs.build-windows.outputs.build_version }}.zip
+            ${{ env.WINDOWS_RELEASE_ZIP }}
             # ./artifacts/pjsip-linux-x64-${{ needs.build-linux.outputs.build_version }}/pjsip-linux-x64-${{ needs.build-linux.outputs.build_version }}.tar.gz # Comentado
             # ./artifacts/pjsip-linux-arm64-${{ needs.build-linux-arm.outputs.build_version }}/pjsip-linux-arm64-${{ needs.build-linux-arm.outputs.build_version }}.tar.gz # Comentado
         env:

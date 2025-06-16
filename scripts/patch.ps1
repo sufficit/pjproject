@@ -30,15 +30,43 @@ try {
 
         if ($preprocessorDefinitionsNode) {
             $existingDefinitions = $preprocessorDefinitionsNode.'#text'
-            $newDefinitions = "_M_X64;_WIN64;$existingDefinitions"
-            $preprocessorDefinitionsNode.'#text' = $newDefinitions
-            Write-Host "Updated PreprocessorDefinitions for Release|x64 in $ProjFile."
-            Write-Host "New definitions: $($preprocessorDefinitionsNode.'#text')"
+            # Adicionar apenas se não existirem para evitar duplicatas e manter a ordem
+            $definitionsToAdd = @("_M_X64", "_WIN64")
+            $currentDefsArray = $existingDefinitions.Split(';') | Where-Object { $_ -ne "" }
+            $newDefinitionsString = $existingDefinitions
+            foreach ($def in $definitionsToAdd) {
+                if ($currentDefsArray -notcontains $def) {
+                    $newDefinitionsString = "$def;$newDefinitionsString" # Adiciona no início
+                }
+            }
+            if ($newDefinitionsString -ne $existingDefinitions) {
+                $preprocessorDefinitionsNode.'#text' = $newDefinitionsString
+                Write-Host "Updated PreprocessorDefinitions for Release|x64 in $ProjFile."
+                Write-Host "New definitions: $($preprocessorDefinitionsNode.'#text')"
+            } else {
+                Write-Host "PreprocessorDefinitions already contain necessary x64 definitions."
+            }
         } else {
             $newDefNode = $projXml.CreateElement("PreprocessorDefinitions", $nsManager.LookupNamespace("msbuild"))
             $newDefNode.'#text' = "_M_X64;_WIN64"
             $clCompileNode.AppendChild($newDefNode)
             Write-Host "Added PreprocessorDefinitions for Release|x64 in $ProjFile."
+        }
+
+        # Patch AdditionalIncludeDirectories para Opus
+        $additionalIncludeDirsNode = $clCompileNode.SelectSingleNode("./msbuild:AdditionalIncludeDirectories", $nsManager)
+        $opusIncludePath = "../../pjlib/include/pj/opus" # Relativo ao pjmedia_codec.vcxproj
+
+        if ($additionalIncludeDirsNode -and $additionalIncludeDirsNode.'#text' -notmatch [regex]::Escape($opusIncludePath)) {
+            $additionalIncludeDirsNode.'#text' = "$($additionalIncludeDirsNode.'#text');$opusIncludePath"
+            Write-Host "Updated AdditionalIncludeDirectories for Release|x64 in $ProjFile to include Opus: $($additionalIncludeDirsNode.'#text')"
+        } elseif (-not $additionalIncludeDirsNode) {
+            $newIncludeNode = $projXml.CreateElement("AdditionalIncludeDirectories", $nsManager.LookupNamespace("msbuild"))
+            $newIncludeNode.'#text' = "$opusIncludePath;%(AdditionalIncludeDirectories)"
+            $clCompileNode.AppendChild($newIncludeNode)
+            Write-Host "Added AdditionalIncludeDirectories node with Opus path for Release|x64 in $ProjFile."
+        } else {
+            Write-Host "Opus include path '$opusIncludePath' already present in AdditionalIncludeDirectories or node not found as expected."
         }
 
         $projXml.Save($ProjFile)

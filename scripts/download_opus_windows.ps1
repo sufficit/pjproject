@@ -4,14 +4,20 @@
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
 # Date: June 16, 2025
-# Version: 2
+# Version: 3
 #
 # This script downloads the latest pre-compiled Opus library for Windows from a GitHub Release,
 # extracts it, and copies the necessary .lib and .h files to the PJSIP build environment.
 #
 # Changes:
 #   - Improved robustness for finding and copying Opus header files, searching recursively.
+#   - Added Set-StrictMode and ErrorActionPreference for better error handling.
+#   - Added cleanup of the temporary download directory (external_libs/opus_temp).
 # =================================================================================================
+
+# Enforce stricter parsing and error handling
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
 
 $REPO_OWNER="sufficit"
 $REPO_NAME="opus"
@@ -23,7 +29,7 @@ $LATEST_RELEASE_DATA = Invoke-RestMethod -Uri "https://api.github.com/repos/${RE
 
 $LATEST_RELEASE_TAG = $LATEST_RELEASE_DATA.tag_name
 if (-not $LATEST_RELEASE_TAG) {
-  Write-Host "##[error]Error: Could not find latest release tag for ${REPO_OWNER}/${REPO_NAME}"
+  Write-Error "Could not find latest release tag for ${REPO_OWNER}/${REPO_NAME}"
   exit 1
 }
 Write-Host "Found latest Opus release tag: $LATEST_RELEASE_TAG"
@@ -34,18 +40,19 @@ Write-Host "Expected artifact name: $EXPECTED_ARTIFACT_NAME"
 
 $DOWNLOAD_URL = $LATEST_RELEASE_DATA.assets | Where-Object { $_.name -eq $EXPECTED_ARTIFACT_NAME } | Select-Object -ExpandProperty browser_download_url
 if (-not $DOWNLOAD_URL) {
-  Write-Host "##[error]Error: Could not find download URL for artifact $EXPECTED_ARTIFACT_NAME in release $LATEST_RELEASE_TAG"
+  Write-Error "Could not find download URL for artifact $EXPECTED_ARTIFACT_NAME in release $LATEST_RELEASE_TAG"
   exit 1
 }
 Write-Host "Downloading Opus artifact from: $DOWNLOAD_URL"
 
-New-Item -ItemType Directory -Path "external_libs/opus_temp" -Force
-$zipPath = Join-Path -Path "external_libs/opus_temp" -ChildPath $EXPECTED_ARTIFACT_NAME
+$tempDownloadDir = "external_libs/opus_temp"
+New-Item -ItemType Directory -Path $tempDownloadDir -Force
+$zipPath = Join-Path -Path $tempDownloadDir -ChildPath $EXPECTED_ARTIFACT_NAME
 
 Invoke-WebRequest -Uri $DOWNLOAD_URL -OutFile $zipPath
 
-Write-Host "Extracting $zipPath to external_libs/opus_temp/"
-Expand-Archive -Path $zipPath -DestinationPath "external_libs/opus_temp/" -Force
+Write-Host "Extracting $zipPath to $tempDownloadDir/"
+Expand-Archive -Path $zipPath -DestinationPath "$tempDownloadDir/" -Force # Ensure trailing slash for destination
 
 # Copy opus.lib to PJSIP's lib directory
 $pjsipLibDir = "lib"
@@ -53,11 +60,11 @@ New-Item -ItemType Directory -Path $pjsipLibDir -Force
 
 $foundOpusLib = Get-ChildItem -Path "external_libs/opus_temp" -Filter "opus.lib" -Recurse | Select-Object -First 1
 
-if ($foundOpusLib) {
+if ($null -ne $foundOpusLib) {
     Copy-Item -Path $foundOpusLib.FullName -Destination $pjsipLibDir
     Write-Host "Copied opus.lib from $($foundOpusLib.FullName) to $pjsipLibDir"
 } else {
-    Write-Host "##[error]Error: opus.lib not found within the extracted contents of the Opus release. Please check the structure."
+    Write-Error "opus.lib not found within the extracted contents of the Opus release ($tempDownloadDir). Please check the artifact structure."
     exit 1
 }
 
@@ -68,11 +75,20 @@ New-Item -ItemType Directory -Path $pjIncludeOpusDir -Force
 # Find all .h files recursively and copy them individually
 $foundOpusHeaders = Get-ChildItem -Path "external_libs/opus_temp" -Filter "*.h" -Recurse
 
-if ($foundOpusHeaders.Count -gt 0) {
+if ($null -ne $foundOpusHeaders -and $foundOpusHeaders.Count -gt 0) {
     foreach ($headerFile in $foundOpusHeaders) {
         Copy-Item -Path $headerFile.FullName -Destination $pjIncludeOpusDir
         Write-Host "Copied header: $($headerFile.FullName) to $pjIncludeOpusDir"
     }
 } else {
-    Write-Host "##[warning]Warning: No Opus header files (*.h) found within extracted contents. Headers might be missing."
+    Write-Warning "No Opus header files (*.h) found within extracted contents ($tempDownloadDir). Headers might be missing."
+}
+
+# Clean up the temporary download directory
+if (Test-Path $tempDownloadDir) {
+    Write-Host "Cleaning up temporary directory: $tempDownloadDir"
+    Remove-Item -Path $tempDownloadDir -Recurse -Force
+}
+
+Write-Host "Opus library and headers successfully processed."
 }
