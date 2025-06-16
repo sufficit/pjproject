@@ -4,14 +4,16 @@
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
 # Date: June 16, 2025
-# Version: 4
+# Version: 5
 #
 # This script downloads the latest pre-compiled Opus library for Windows from a GitHub Release,
 # extracts it, and copies the necessary .lib and .h files to the PJSIP build environment.
 #
 # Changes:
-#   - Improved robustness for finding and copying Opus header files, searching recursively and
-#     also explicitly looking in common 'include' subdirectories.
+#   - Improved robustness for finding and copying Opus header files by ensuring recursive search
+#     and checking common 'include' subdirectories.
+#   - **Updated the warning message regarding missing headers to clarify the likely cause:
+#     the Opus release artifact itself might not contain the necessary header files.**
 #   - Added Set-StrictMode and ErrorActionPreference for better error handling.
 #   - Added cleanup of the temporary download directory (external_libs/opus_temp).
 # =================================================================================================
@@ -80,42 +82,22 @@ New-Item -ItemType Directory -Path $pjIncludeOpusDir -Force
 
 $foundOpusHeaders = @()
 
-# First, try a broad recursive search
-Write-Host "Attempting broad recursive search for Opus headers (*.h) in '$tempDownloadDir'..."
-$foundOpusHeaders = Get-ChildItem -Path "$tempDownloadDir" -Filter "*.h" -Recurse
+# First, try a broad recursive search for Opus headers, which should catch them
+# if they are directly in any subfolder of $tempDownloadDir
+Write-Host "Attempting broad recursive search for Opus headers (*.h) in '$tempDownloadDir' and its subdirectories..."
+$foundOpusHeaders = Get-ChildItem -Path "$tempDownloadDir" -Filter "*.h" -Recurse -ErrorAction SilentlyContinue
 
-# If no headers found, try more specific common include paths
+# If no headers found, it's highly likely they are not included in the artifact
 if ($null -eq $foundOpusHeaders -or $foundOpusHeaders.Count -eq 0) {
-    Write-Host "Broad search yielded no headers. Trying specific 'include' subdirectories..."
-    $possibleIncludePaths = @(
-        Join-Path -Path $tempDownloadDir -ChildPath "include"
-        Join-Path -Path $tempDownloadDir -ChildPath "build-windows\include"
-        Join-Path -Path $tempDownloadDir -ChildPath "build-windows\Release\include" # Add if it's very specific
-        Join-Path -Path $tempDownloadDir -ChildPath "src\include" # Sometimes headers are in src/include
-    )
-
-    foreach ($includePath in $possibleIncludePaths) {
-        if (Test-Path $includePath -PathType Container) {
-            Write-Host "Searching for headers in specific path: '$includePath'..."
-            $headersInSpecificPath = Get-ChildItem -Path $includePath -Filter "*.h" -Recurse
-            if ($null -ne $headersInSpecificPath -and $headersInSpecificPath.Count -gt 0) {
-                $foundOpusHeaders += $headersInSpecificPath
-                Write-Host "Found $($headersInSpecificPath.Count) headers in '$includePath'."
-                # Break if headers are found in one of the specific paths to avoid duplicates/unnecessary searches
-                break
-            }
-        }
-    }
-}
-
-
-if ($null -ne $foundOpusHeaders -and $foundOpusHeaders.Count -gt 0) {
+    Write-Warning "No Opus header files (*.h) were found within the extracted contents of the Opus release artifact ('$tempDownloadDir'). " + `
+                  "This indicates that the downloaded Opus release ZIP might not contain the necessary header files. " + `
+                  "Please ensure the 'sufficit/opus' release artifact includes the header files (e.g., in an 'include' or 'build-windows/include' directory)."
+} else {
     foreach ($headerFile in $foundOpusHeaders) {
         Copy-Item -Path $headerFile.FullName -Destination $pjIncludeOpusDir
         Write-Host "Copied header: $($headerFile.FullName) to $pjIncludeOpusDir"
     }
-} else {
-    Write-Warning "No Opus header files (*.h) found within extracted contents ($tempDownloadDir) or common include paths. Headers might be missing."
+    Write-Host "Successfully copied $($foundOpusHeaders.Count) Opus header files."
 }
 
 # Clean up the temporary download directory
@@ -124,4 +106,4 @@ if (Test-Path $tempDownloadDir) {
     Remove-Item -Path $tempDownloadDir -Recurse -Force
 }
 
-Write-Host "Opus library and headers successfully processed."
+Write-Host "Opus library and header processing completed."
