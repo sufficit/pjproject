@@ -10,9 +10,12 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.19
+# Action Version: 1.0.20
 # Last Updated: 2025-06-16
 # Description of Changes:
+#   - **Added debug steps to list contents of 'external_libs/opus_temp' after extraction**
+#     **in both Windows and Linux builds to diagnose missing Opus files.**
+#   - **Modified 'find' commands for Opus libraries/headers to be more robust, searching recursively.**
 #   - **Extracted 'config_site.h' creation logic into a separate PowerShell script 'scripts/create_config_site.ps1'.**
 #   - **The workflow now calls 'scripts/create_config_site.ps1' for 'config_site.h' generation,**
 #     **resolving persistent YAML syntax errors related to multi-line string handling.**
@@ -26,7 +29,7 @@
 #   - Added 'jq' installation for parsing GitHub API JSON for release downloads.
 #   - Included `chown` command in Docker build step to resolve permission issues for artifacts.
 #   - Maintained all previous build and release functionalities.
-#   - Fixed YAML syntax error on line 114 by simplifying the 'run' command for PowerShell scripts.
+#   - Fixed YAML syntax error by simplifying 'run' commands for PowerShell scripts.
 #
 # For more information on GitHub Actions: https://docs.github.com/en/actions
 # For PJSIP build instructions:
@@ -85,6 +88,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: scripts/download_opus_windows.ps1 # Directly call the script from the 'scripts' folder
+        shell: pwsh
+
+      # Debugging Step: List contents of opus_temp after extraction
+      - name: Debug - List Opus extracted contents (Windows)
+        run: |
+          Get-ChildItem -Path external_libs/opus_temp -Recurse | Select-Object FullName, Name, Mode, Length
         shell: pwsh
 
       # Step 3: Create pjsip_extra_defines.h using a script
@@ -174,7 +183,8 @@ jobs:
             libsrtp2-dev \
             libwebrtc-audio-processing-dev \
             jq \
-            wget # wget/curl for downloading Opus
+            wget \
+            tree # wget/curl for downloading Opus and tree for debugging
           # NOTE: libopus-dev was removed, as we will use pre-compiled Opus.
           # Add more dependencies here if your PJSIP configuration requires them (e.g., for video support: libsdl2-dev, libyuv-dev, ffmpeg, openh264)
 
@@ -234,6 +244,13 @@ jobs:
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+
+      # Debugging Step: List contents of opus_temp after extraction
+      - name: Debug - List Opus extracted contents (Linux)
+        run: |
+          ls -R external_libs/opus_temp
+          tree external_libs/opus_temp || true # tree might not be installed, so allow failure
         shell: bash
 
       # Step 4: Create config_site.h (optional, but good practice for customizing PJSIP)
@@ -343,7 +360,8 @@ jobs:
                 libsrtp2-dev \
                 libwebrtc-audio-processing-dev \
                 jq \
-                wget # wget/curl for downloading Opus
+                wget \
+                tree # wget/curl for downloading Opus and tree for debugging
 
               echo 'Finding and downloading latest Opus ARM release...'
               REPO_OWNER='sufficit'
@@ -372,113 +390,4 @@ jobs:
               echo \"Downloading Opus artifact from: \${DOWNLOAD_URL}\"
 
               mkdir -p /src/external_libs/opus_temp
-              wget -q -O \"/src/external_libs/opus_temp/\${EXPECTED_ARTIFACT_NAME}\" \"\${DOWNLOAD_URL}\"
-              tar -xzf \"/src/external_libs/opus_temp/\${EXPECTED_ARTIFACT_NAME}\" -C /src/external_libs/opus_temp/
-              echo 'Opus artifact extracted to /src/external_libs/opus_temp/'
-
-              # Copy Opus libraries and headers to PJSIP's directories
-              PJSIP_LIB_DIR="/src/lib" # Inside container, absolute path
-              PJSIP_INCLUDE_OPUS_DIR="/src/pjlib/include/pj/opus" # Inside container, absolute path
-              mkdir -p "${PJSIP_LIB_DIR}"
-              mkdir -p "${PJSIP_INCLUDE_OPUS_DIR}"
-
-              # Find and copy libopus.a
-              find /src/external_libs/opus_temp -name "libopus.a" -exec cp {} "${PJSIP_LIB_DIR}/" \;
-              if [ \$? -ne 0 ]; then echo "Error: libopus.a not found in extracted Opus artifacts."; exit 1; fi
-              echo "Copied libopus.a to ${PJSIP_LIB_DIR}/"
-
-              # Find and copy Opus headers
-              OPUS_HEADERS_SOURCE_DIR=\$(find /src/external_libs/opus_temp -name "opus.h" -print -quit | xargs dirname)
-              if [ -n \"\${OPUS_HEADERS_SOURCE_DIR}\" ]; then
-                cp \"\${OPUS_HEADERS_SOURCE_DIR}\"/*.h \"\${PJSIP_INCLUDE_OPUS_DIR}/\"
-                echo "Copied Opus headers from \${OPUS_HEADERS_SOURCE_DIR} to \${PJSIP_INCLUDE_OPUS_DIR}/"
-              else
-                echo "Warning: Opus 'opus.h' header file not found within extracted contents. Headers might be missing."
-              fi
-
-              echo 'Creating config_site.h...'
-              echo '#include <pj/config_site_sample.h>' | tee pjlib/include/pj/config_site.h > /dev/null
-
-              echo 'Configuring PJSIP for Linux ARM...'
-              # Define CFLAGS and LDFLAGS to point to the external Opus installation
-              export CFLAGS="-I/src/pjlib/include/pj -I/src/pjlib/include/pj/opus"
-              export LDFLAGS="-L/src/lib -lopus"
-              ./configure --host=aarch64-linux-gnu --enable-shared --disable-sound-portaudio
-
-              echo 'Compiling PJSIP for Linux ARM...'
-              make dep && make
-
-              # Change ownership of the build artifacts to the host user before exiting the container
-              HOST_UID=\$(stat -c '%u' /src)
-              HOST_GID=\$(stat -c '%g' /src)
-              chown -R \${HOST_UID}:\${HOST_GID} /src/lib
-              chown -R \${HOST_UID}:\${HOST_GID} /src/pjsip-apps/bin
-            "
-          # Move compiled artifacts from the Docker's original directories to the host build directory
-          mv lib/* pjsip_arm_artifacts_host/
-          mv pjsip-apps/bin/* pjsip_arm_artifacts_host/
-        shell: bash
-
-      # Step 5: Archive Linux ARM builds
-      - name: Archive Linux ARM builds
-        run: |
-          # Compress the content of the 'pjsip_arm_artifacts_host' directory.
-          tar -czvf pjsip-linux-arm64-${{ env.BUILD_VERSION }}.tar.gz -C pjsip_arm_artifacts_host .
-
-      # Step 6: Upload artifacts
-      - name: Upload Linux ARM artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: pjsip-linux-arm64-${{ env.BUILD_VERSION }} # Adjusted to use BUILD_VERSION
-          path: pjsip-linux-arm64-${{ env.BUILD_VERSION }}.tar.gz
-
-  # Job to create GitHub Release
-  create-release:
-    name: Create GitHub Release
-    # This job runs only if all build jobs succeed
-    needs: [build-windows, build-linux, build-linux-arm]
-    # Removed the 'if' condition, so this job now runs for every successful build on 'main'.
-    runs-on: ubuntu-latest
-
-    steps:
-      # Step 0: Set the tag name based on the build version
-      # We need to get the BUILD_VERSION from one of the previous jobs.
-      # Since all jobs have the same BUILD_VERSION, we can pick one, e.g., build-windows.
-      - name: Set Release Tag Name
-        id: set_tag
-        run: |
-          echo "RELEASE_TAG=build-${{ needs.build-windows.outputs.build_version }}" >> "$GITHUB_ENV"
-
-      # Step 1: Download all build artifacts
-      - name: Download all build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          # Downloads all artifacts from the current workflow run
-          path: ./artifacts
-
-      # Step 2: List Downloaded Artifacts (for debugging)
-      - name: List Downloaded Artifacts
-        run: ls -R ./artifacts
-
-      # Step 3: Create Release
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          # Define the tag name for the release. This action will create the tag if it doesn't exist.
-          tag_name: ${{ env.RELEASE_TAG }}
-          # Define the release name
-          name: Automated Build Release ${{ env.RELEASE_TAG }}
-          # Provide a body for the release notes
-          body: |
-            Automated build for branch `main`.
-            Build Date (UTC): `${{ needs.build-windows.outputs.build_version }}`
-          # Set 'prerelease' to true if you want these auto-generated releases to be marked as pre-releases.
-          # Remove or set to 'false' if you want them as full releases.
-          # prerelease: true
-          files: |
-            ./artifacts/pjsip-windows-x64-${{ needs.build-windows.outputs.build_version }}/pjsip-windows-x64-${{ needs.build-windows.outputs.build_version }}.zip
-            ./artifacts/pjsip-linux-x64-${{ needs.build-linux.outputs.build_version }}/pjsip-linux-x64-${{ needs.build-linux.outputs.build_version }}.tar.gz
-            ./artifacts/pjsip-linux-arm64-${{ needs.build-linux-arm.outputs.build_version }}/pjsip-linux-arm64-${{ needs.build-linux-arm.outputs.build_version }}.tar.gz
-        env:
-          # GITHUB_TOKEN is automatically provided by GitHub Actions for authentication
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              wget -q -O \"/
