@@ -4,13 +4,14 @@
 # Author: Hugo Castro de Deco, Sufficit
 # Collaboration: Gemini AI for Google
 # Date: June 16, 2025
-# Version: 3
+# Version: 4
 #
 # This script downloads the latest pre-compiled Opus library for Windows from a GitHub Release,
 # extracts it, and copies the necessary .lib and .h files to the PJSIP build environment.
 #
 # Changes:
-#   - Improved robustness for finding and copying Opus header files, searching recursively.
+#   - Improved robustness for finding and copying Opus header files, searching recursively and
+#     also explicitly looking in common 'include' subdirectories.
 #   - Added Set-StrictMode and ErrorActionPreference for better error handling.
 #   - Added cleanup of the temporary download directory (external_libs/opus_temp).
 # =================================================================================================
@@ -54,11 +55,16 @@ Invoke-WebRequest -Uri $DOWNLOAD_URL -OutFile $zipPath
 Write-Host "Extracting $zipPath to $tempDownloadDir/"
 Expand-Archive -Path $zipPath -DestinationPath "$tempDownloadDir/" -Force # Ensure trailing slash for destination
 
+# Debugging: List contents after extraction to help understand the structure
+Write-Host "--- Contents of $tempDownloadDir after extraction (for debugging) ---"
+Get-ChildItem -Path $tempDownloadDir -Recurse | Select-Object FullName
+Write-Host "-----------------------------------------------------------------"
+
 # Copy opus.lib to PJSIP's lib directory
 $pjsipLibDir = "lib"
 New-Item -ItemType Directory -Path $pjsipLibDir -Force
 
-$foundOpusLib = Get-ChildItem -Path "external_libs/opus_temp" -Filter "opus.lib" -Recurse | Select-Object -First 1
+$foundOpusLib = Get-ChildItem -Path "$tempDownloadDir" -Filter "opus.lib" -Recurse | Select-Object -First 1
 
 if ($null -ne $foundOpusLib) {
     Copy-Item -Path $foundOpusLib.FullName -Destination $pjsipLibDir
@@ -72,8 +78,36 @@ if ($null -ne $foundOpusLib) {
 $pjIncludeOpusDir = "pjlib/include/pj/opus"
 New-Item -ItemType Directory -Path $pjIncludeOpusDir -Force
 
-# Find all .h files recursively and copy them individually
-$foundOpusHeaders = Get-ChildItem -Path "external_libs/opus_temp" -Filter "*.h" -Recurse
+$foundOpusHeaders = @()
+
+# First, try a broad recursive search
+Write-Host "Attempting broad recursive search for Opus headers (*.h) in '$tempDownloadDir'..."
+$foundOpusHeaders = Get-ChildItem -Path "$tempDownloadDir" -Filter "*.h" -Recurse
+
+# If no headers found, try more specific common include paths
+if ($null -eq $foundOpusHeaders -or $foundOpusHeaders.Count -eq 0) {
+    Write-Host "Broad search yielded no headers. Trying specific 'include' subdirectories..."
+    $possibleIncludePaths = @(
+        Join-Path -Path $tempDownloadDir -ChildPath "include"
+        Join-Path -Path $tempDownloadDir -ChildPath "build-windows\include"
+        Join-Path -Path $tempDownloadDir -ChildPath "build-windows\Release\include" # Add if it's very specific
+        Join-Path -Path $tempDownloadDir -ChildPath "src\include" # Sometimes headers are in src/include
+    )
+
+    foreach ($includePath in $possibleIncludePaths) {
+        if (Test-Path $includePath -PathType Container) {
+            Write-Host "Searching for headers in specific path: '$includePath'..."
+            $headersInSpecificPath = Get-ChildItem -Path $includePath -Filter "*.h" -Recurse
+            if ($null -ne $headersInSpecificPath -and $headersInSpecificPath.Count -gt 0) {
+                $foundOpusHeaders += $headersInSpecificPath
+                Write-Host "Found $($headersInSpecificPath.Count) headers in '$includePath'."
+                # Break if headers are found in one of the specific paths to avoid duplicates/unnecessary searches
+                break
+            }
+        }
+    }
+}
+
 
 if ($null -ne $foundOpusHeaders -and $foundOpusHeaders.Count -gt 0) {
     foreach ($headerFile in $foundOpusHeaders) {
@@ -81,7 +115,7 @@ if ($null -ne $foundOpusHeaders -and $foundOpusHeaders.Count -gt 0) {
         Write-Host "Copied header: $($headerFile.FullName) to $pjIncludeOpusDir"
     }
 } else {
-    Write-Warning "No Opus header files (*.h) found within extracted contents ($tempDownloadDir). Headers might be missing."
+    Write-Warning "No Opus header files (*.h) found within extracted contents ($tempDownloadDir) or common include paths. Headers might be missing."
 }
 
 # Clean up the temporary download directory
