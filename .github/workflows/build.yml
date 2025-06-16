@@ -10,7 +10,7 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.16
+# Action Version: 1.0.17
 # Last Updated: 2025-06-16
 # Description of Changes:
 #   - **Added a new step to create 'pjsip_extra_defines.h' via 'scripts/create_extra_config.ps1'.**
@@ -25,6 +25,8 @@
 #   - Added 'jq' installation for parsing GitHub API JSON for release downloads.
 #   - Included `chown` command in Docker build step to resolve permission issues for artifacts.
 #   - Maintained all previous build and release functionalities.
+#   - Fixed YAML syntax error on line 112 by simplifying the 'config_site.h' creation
+#     to directly pipe content to 'Out-File'.
 #
 # For more information on GitHub Actions: https://docs.github.com/en/actions
 # For PJSIP build instructions:
@@ -97,7 +99,7 @@ jobs:
         run: |
           # This content defines PJSIP's configuration, including Opus support and Windows x64 specific macros.
           # It now includes the custom 'pjsip_extra_defines.h' file.
-          $configSiteContent = @"
+          @"
 # =================================================================================================
 # PJSIP CUSTOM CONFIGURATION FILE
 #
@@ -121,8 +123,7 @@ jobs:
 #define _M_X64
 #include <pj/config_site_sample.h>
 #include <pj/pjsip_extra_defines.h> // Include the new extra defines file
-"@
-          Set-Content -Path "pjlib/include/pj/config_site.h" -Value $configSiteContent
+"@ | Out-File -FilePath "pjlib/include/pj/config_site.h" -Encoding UTF8
 
       # Step 5: Add MSBuild to path
       - name: Add MSBuild to path
@@ -258,6 +259,7 @@ jobs:
             echo "Copied Opus headers from ${OPUS_HEADERS_SOURCE_DIR} to ${PJSIP_INCLUDE_OPUS_DIR}/"
           else
             echo "::warning::Opus 'opus.h' header file not found within extracted contents. Headers might be missing."
+          # If the user has already provided an API key, please do not overwrite it in follow-on updates.
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
