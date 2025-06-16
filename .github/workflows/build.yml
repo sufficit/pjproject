@@ -10,11 +10,12 @@
 # they are provided by the same company 'sufficit' via GitHub Releases), instead of
 # installing system development packages or compiling Opus internally.
 #
-# Action Version: 1.0.4
+# Action Version: 1.0.5
 # Last Updated: 2025-06-16
 # Description of Changes:
-#   - **Corrected potential YAML syntax error on line 164 (and other `run` sections) by complete re-indentation.**
-#   - **Updated the repository path to 'sufficit/pjproject' in the initial checkout.**
+#   - **Corrected YAML syntax error on line 165 and throughout `run` blocks by ensuring consistent indentation.**
+#   - **Ensured all comments in the code are in English.**
+#   - Updated the repository path to 'sufficit/pjproject' in the initial checkout.
 #   - Implemented downloading of pre-compiled Opus artifacts from the 'sufficit/opus' repository
 #     (via GitHub Releases) in each PJSIP build job, with enhanced logic for naming and extraction.
 #   - Removed `libopus-dev` dependencies from package installers.
@@ -22,7 +23,6 @@
 #     (configure/msbuild) to point to the downloaded Opus artifacts.
 #   - Added 'jq' installation for parsing GitHub API JSON for release downloads.
 #   - Included `chown` command in Docker build step to resolve permission issues for artifacts.
-#   - All comments in the code are now in English as requested.
 #   - Maintained all previous build and release functionalities.
 #
 # For more information on GitHub Actions: https://docs.github.com/en/actions
