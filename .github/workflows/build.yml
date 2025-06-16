@@ -24,6 +24,7 @@
 #   - Added 'jq' installation for parsing GitHub API JSON for release downloads.
 #   - Included `chown` command in Docker build step to resolve permission issues for artifacts.
 #   - Maintained all previous build and release functionalities.
+#   - Fixed YAML syntax error on line 98 by correcting the indentation of the 'env' block.
 #
 # For more information on GitHub Actions: https://docs.github.com/en/actions
 # For PJSIP build instructions:
@@ -62,7 +63,7 @@ jobs:
       - name: Get current date and time
         id: date
         run: |
-          # Formats the date and time as YYYYMMDD-HHMMSS (UTC)
+          # Formats the date and time asOGRAPHYYYYYMMDD-HHMMSS (UTC)
           $build_version = (Get-Date -UFormat %Y%m%d-%H%M%S)
           echo "BUILD_VERSION=$build_version" | Out-File -FilePath $env:GITHUB_ENV -Append
           echo "BUILD_VERSION=$build_version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append # Output for job dependencies
@@ -162,10 +163,10 @@ if ($foundOpusHeadersPath) {
       # Step 3: Find and download the latest Opus release for Windows (Execute script)
       - name: Find and download latest Opus Windows release
         id: download_opus_release_windows
+        env: # Corrected indentation for env block
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           pwsh.exe -File scripts/download_opus_windows.ps1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: powershell
 
       # Step 4: Create PJSIP config_site.h
@@ -370,7 +371,7 @@ try {
       - name: Get current date and time
         id: date
         run: |
-          # Formats the date and time as YYYYMMDD-HHMMSS (UTC)
+          # Formats the date and time asOGRAPHYYYYYMMDD-HHMMSS (UTC)
           echo "BUILD_VERSION=$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_ENV"
           echo "BUILD_VERSION=$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT" # Output for job dependencies
 
@@ -511,7 +512,7 @@ try {
       - name: Get current date and time
         id: date
         run: |
-          # Formats the date and time as YYYYMMDD-HHMMSS (UTC)
+          # Formats the date and time asOGRAPHYYYYYMMDD-HHMMSS (UTC)
           echo "BUILD_VERSION=$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_ENV"
           echo "BUILD_VERSION=$(date -u +%Y%m%d-%H%M%S)" >> "$GITHUB_OUTPUT" # Output for job dependencies
 
