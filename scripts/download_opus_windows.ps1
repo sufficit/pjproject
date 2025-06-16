@@ -91,4 +91,3 @@ if (Test-Path $tempDownloadDir) {
 }
 
 Write-Host "Opus library and headers successfully processed."
-}
